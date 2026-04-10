@@ -1,0 +1,13 @@
+{
+  "require_approval": true,
+  "download_before_delete": false,
+  "protected_senders": [
+    "keo893@gmail.com",
+    "klehmer0812@gmail.com"
+  ],
+  "protected_keywords": [
+    "passport",
+    "tax"
+  ],
+  "custom_instructions": "Don't delete (or suggest) any emails from the Philadelphia Eagles. Don't delete (or suggest) anything from the previous 90 days. Don't suggest emails from subscriptions, airlines, or banks (unless any of these are promotional). Important emails containing records should not be suggested for deletion. Emphasize deleting promotional and social emails as well as emails older than 1 year. Prioritize sender based groups that can be deleted in bulk (for example zillow)."
+}

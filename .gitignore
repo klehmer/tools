@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+
+# Environment / secrets
+.env
+*.env.local
+
+# App data (sessions, reports)
+**/data/
+
+# Build output
+dist/
+
+# Test artifacts
+.coverage
+htmlcov/
+
+# OS files
+.DS_Store
