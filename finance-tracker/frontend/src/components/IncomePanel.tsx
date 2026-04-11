@@ -1,0 +1,82 @@
+import { useEffect, useState } from "react";
+import { api, formatCurrencyCents } from "../services/api";
+import type { IncomeSummary } from "../types";
+
+export function IncomePanel() {
+  const [windowDays, setWindowDays] = useState(90);
+  const [data, setData] = useState<IncomeSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.income(windowDays).then(setData).catch((e) => setError(e.message));
+  }, [windowDays]);
+
+  if (error) return <div className="text-rose-600">Error: {error}</div>;
+  if (!data) return <div className="text-slate-500">Loading…</div>;
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="flex items-baseline justify-between">
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
+              Monthly income (avg)
+            </div>
+            <div className="mt-1 text-3xl font-semibold text-slate-900">
+              {formatCurrencyCents(data.total_monthly)}
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              based on last {data.window_days} days of deposits
+            </div>
+          </div>
+          <select
+            value={windowDays}
+            onChange={(e) => setWindowDays(Number(e.target.value))}
+            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm"
+          >
+            <option value={30}>30 days</option>
+            <option value={60}>60 days</option>
+            <option value={90}>90 days</option>
+            <option value={180}>180 days</option>
+            <option value={365}>365 days</option>
+          </select>
+        </div>
+      </div>
+
+      {data.sources.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-slate-500">
+          No income-like deposits detected in this window.
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs uppercase tracking-wide text-slate-500">
+                <th className="px-5 py-2 text-left font-medium">Source</th>
+                <th className="px-5 py-2 text-left font-medium">Last deposit</th>
+                <th className="px-5 py-2 text-right font-medium">Last amount</th>
+                <th className="px-5 py-2 text-right font-medium">Avg monthly</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.sources.map((s) => (
+                <tr key={s.name} className="border-t border-slate-100">
+                  <td className="px-5 py-2 font-medium">{s.name}</td>
+                  <td className="px-5 py-2 text-slate-600">{s.last_payment_date || "—"}</td>
+                  <td className="px-5 py-2 text-right tabular-nums">
+                    {s.last_payment_amount != null
+                      ? formatCurrencyCents(s.last_payment_amount)
+                      : "—"}
+                  </td>
+                  <td className="px-5 py-2 text-right font-semibold tabular-nums">
+                    {formatCurrencyCents(s.average_monthly)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

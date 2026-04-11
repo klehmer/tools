@@ -18,6 +18,22 @@ AI-powered summaries of your Gmail inbox and Google Calendar. Pick a time period
 
 [Full documentation →](calendar-email-summary/README.md)
 
+## Finance Tracker
+
+Local-first personal finance dashboard. Links multiple financial institutions read-only through Plaid (Robinhood, PNC, Vanguard, Fidelity, Chase, Schwab, Coinbase, and 12,000+ others), then aggregates everything into net worth, subscriptions, income, and goal-based plans.
+
+**Key features:**
+- Read-only account linking via Plaid Link — no credentials stored locally
+- Net worth with asset/liability breakdown (Cash, Investments, Retirement, Credit Cards, Loans, …)
+- Subscription detection: groups recurring charges by merchant, flags cadence + annualized cost
+- Income analysis over configurable 30–365 day windows
+- Goals & financial planning: add goals (savings, debt payoff, retirement, purchase) and project whether your cash flow supports them; get required monthly contributions and feasibility ratings
+- Link as many institutions as you want
+
+**Stack:** FastAPI, plaid-python, React, TypeScript, Tailwind CSS, react-plaid-link
+
+[Full documentation →](finance-tracker/README.md)
+
 ## Gmail Manager
 
 A local-only tool for burning down a bloated Gmail inbox. Combines a dashboard for manual triage with a long-lived CLI cleanup agent (Claude Code or Codex) that proposes bulk actions — delete, block, unsubscribe — for one-click review.
@@ -47,6 +63,11 @@ cd calendar-email-summary
 cd gmail-manager
 ./start.sh
 # Open http://localhost:5173
+
+# Finance Tracker
+cd finance-tracker
+./start.sh
+# Open http://localhost:5175
 ```
 
-Both tools require Google Cloud OAuth 2.0 credentials (Gmail API + Calendar API or Drive API enabled). See each tool's README for detailed setup instructions.
+The Google-powered tools require Google Cloud OAuth 2.0 credentials (Gmail API + Calendar API or Drive API enabled). Finance Tracker requires a free Plaid developer account. See each tool's README for detailed setup instructions.
