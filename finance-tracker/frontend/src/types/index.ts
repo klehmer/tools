@@ -160,7 +160,7 @@ export interface StatusResponse {
 }
 
 export type SpendingCategory = "subscription" | "bill" | "work_expense" | "food" | "vacation" | "other";
-export type SpendingFrequency = "weekly" | "biweekly" | "monthly" | "quarterly" | "annual";
+export type SpendingFrequency = "one_time" | "weekly" | "biweekly" | "monthly" | "quarterly" | "annual";
 
 export interface SpendingTransaction {
   date: string;

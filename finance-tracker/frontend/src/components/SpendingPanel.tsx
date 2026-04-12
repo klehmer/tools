@@ -13,6 +13,7 @@ const CATEGORIES: { value: SpendingCategory; label: string }[] = [
 ];
 
 const FREQUENCIES: { value: SpendingFrequency; label: string }[] = [
+  { value: "one_time", label: "One time" },
   { value: "weekly", label: "Weekly" },
   { value: "biweekly", label: "Biweekly" },
   { value: "monthly", label: "Monthly" },

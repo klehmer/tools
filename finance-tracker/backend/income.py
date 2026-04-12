@@ -256,6 +256,7 @@ _CHECK_NUMBER_RE = re.compile(r"check\s*#?\s*(\d+)", re.IGNORECASE)
 
 # Frequency → monthly multiplier
 _FREQ_TO_MONTHLY: Dict[str, float] = {
+    "one_time": 0.0,
     "weekly": 52.0 / 12.0,
     "biweekly": 26.0 / 12.0,
     "monthly": 1.0,

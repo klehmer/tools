@@ -159,7 +159,7 @@ class NetWorthSnapshot(BaseModel):
 # --- Subscriptions -----------------------------------------------------------
 
 SpendingCategory = Literal["subscription", "bill", "work_expense", "food", "vacation", "other"]
-SpendingFrequency = Literal["weekly", "biweekly", "monthly", "quarterly", "annual"]
+SpendingFrequency = Literal["one_time", "weekly", "biweekly", "monthly", "quarterly", "annual"]
 
 
 class CategoryRuleRequest(BaseModel):
