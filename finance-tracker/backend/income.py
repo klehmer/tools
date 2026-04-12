@@ -241,6 +241,16 @@ _CATEGORY_TO_BUCKET = {
     "other": "other",
 }
 
+# Reverse: bucket key → canonical SpendingCategory value for the API response
+_BUCKET_TO_CATEGORY = {
+    "subscriptions": "subscription",
+    "bills": "bill",
+    "work_expenses": "work_expense",
+    "food": "food",
+    "vacation": "vacation",
+    "other": "other",
+}
+
 
 _CHECK_NUMBER_RE = re.compile(r"check\s*#?\s*(\d+)", re.IGNORECASE)
 
@@ -298,7 +308,7 @@ def spending_breakdown(
             "name": name,
             "amount": round(float(t["amount"]), 2),
             "merchant_key": merchant_key,
-            "category": bucket,
+            "category": _BUCKET_TO_CATEGORY.get(bucket, bucket),
             "account_name": account_map.get(t.get("account_id", ""), ""),
         }
 
