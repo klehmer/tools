@@ -534,10 +534,22 @@ def dashboard():
     sources = storage.list_sources()
     nw = compute_net_worth(accounts)
     inc = summarize_income(txns, window_days=90, accounts=accounts)
+
+    # Use spending breakdown with user frequency rules for accurate projections
     subs = detect_subscriptions(txns, accounts=accounts)
-    active_subs = [s for s in subs if s.status == "active" and s.kind == "subscription"]
-    subs_total = round(sum(s.annualized_cost / 12.0 for s in active_subs), 2)
-    spending = monthly_spending(txns, accounts=accounts)
+    from subscriptions import _normalize_merchant
+    categories: dict = {}
+    for s in subs:
+        key = _normalize_merchant(s.merchant)
+        categories[key] = "subscription" if s.kind == "subscription" else "bill"
+    categories.update(storage.get_category_rules())
+    freq_rules = storage.get_frequency_rules()
+    breakdown = spending_breakdown(txns, categories, window_days=90, accounts=accounts, frequency_rules=freq_rules)
+
+    subs_monthly = breakdown["subscriptions"].get("monthly_equivalent", 0.0)
+    sub_merchants = {t["merchant_key"] for t in breakdown["subscriptions"]["transactions"]}
+    spending_total = monthly_spending(txns, accounts=accounts)
+
     last = max((s.get("last_synced_at") or "" for s in sources), default=None) or None
     kind_counts: dict = {}
     for s in sources:
@@ -545,9 +557,9 @@ def dashboard():
     return DashboardSummary(
         net_worth=nw,
         monthly_income=inc.total_monthly,
-        monthly_spending=spending,
-        monthly_subscriptions_total=subs_total,
-        subscription_count=len(active_subs),
+        monthly_spending=spending_total,
+        monthly_subscriptions_total=round(subs_monthly, 2),
+        subscription_count=len(sub_merchants),
         linked_source_count=len(sources),
         source_counts_by_kind=kind_counts,
         account_count=len(accounts),
@@ -579,13 +591,24 @@ def plan(req: PlanRequest):
     txns = storage.list_transactions()
     accs = storage.list_accounts()
     inc = summarize_income(txns, window_days=90, accounts=accs)
+
+    # Use frequency-based projections consistent with dashboard
     subs = detect_subscriptions(txns, accounts=accs)
-    subs_total = sum(s.annualized_cost / 12.0 for s in subs if s.status == "active" and s.kind == "subscription")
-    spending = monthly_spending(txns, accounts=accs)
+    from subscriptions import _normalize_merchant
+    categories: dict = {}
+    for s in subs:
+        key = _normalize_merchant(s.merchant)
+        categories[key] = "subscription" if s.kind == "subscription" else "bill"
+    categories.update(storage.get_category_rules())
+    freq_rules = storage.get_frequency_rules()
+    breakdown = spending_breakdown(txns, categories, window_days=90, accounts=accs, frequency_rules=freq_rules)
+    subs_monthly = breakdown["subscriptions"].get("monthly_equivalent", 0.0)
+
+    spending_total = monthly_spending(txns, accounts=accs)
     return build_plan(
         goals=req.goals,
         annual_rate=req.assumed_return_annual,
         monthly_income=inc.total_monthly,
-        monthly_spending=spending,
-        monthly_subscriptions=subs_total,
+        monthly_spending=spending_total,
+        monthly_subscriptions=round(subs_monthly, 2),
     )
