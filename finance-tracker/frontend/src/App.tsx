@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   Wallet,
-  Repeat,
+  CreditCard,
   ArrowUpRight,
   Target,
   RefreshCw,
@@ -13,19 +13,19 @@ import { api } from "./services/api";
 import type { StatusResponse } from "./types";
 import { DashboardPanel } from "./components/DashboardPanel";
 import { AccountsPanel } from "./components/AccountsPanel";
-import { SubscriptionsPanel } from "./components/SubscriptionsPanel";
+import { SpendingPanel } from "./components/SpendingPanel";
 import { IncomePanel } from "./components/IncomePanel";
 import { GoalsPanel } from "./components/GoalsPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { AddSourceModal } from "./components/AddSourceModal";
 import { SettingsModal } from "./components/SettingsModal";
 
-type Tab = "dashboard" | "accounts" | "subscriptions" | "income" | "goals";
+type Tab = "dashboard" | "accounts" | "spending" | "income" | "goals";
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard className="h-4 w-4" /> },
   { id: "accounts", label: "Accounts", icon: <Wallet className="h-4 w-4" /> },
-  { id: "subscriptions", label: "Subscriptions", icon: <Repeat className="h-4 w-4" /> },
+  { id: "spending", label: "Spending", icon: <CreditCard className="h-4 w-4" /> },
   { id: "income", label: "Income", icon: <ArrowUpRight className="h-4 w-4" /> },
   { id: "goals", label: "Goals & plan", icon: <Target className="h-4 w-4" /> },
 ];
@@ -144,7 +144,7 @@ export default function App() {
                 {tab === "accounts" && (
                   <AccountsPanel reloadKey={reloadKey} onChange={bump} />
                 )}
-                {tab === "subscriptions" && <SubscriptionsPanel key={reloadKey} />}
+                {tab === "spending" && <SpendingPanel key={reloadKey} />}
                 {tab === "income" && <IncomePanel key={reloadKey} />}
                 {tab === "goals" && <GoalsPanel key={reloadKey} />}
               </ErrorBoundary>

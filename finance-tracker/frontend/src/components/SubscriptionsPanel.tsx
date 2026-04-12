@@ -22,35 +22,46 @@ export function SubscriptionsPanel() {
     );
   }
 
-  const active = subs.filter((s) => s.status === "active");
-  const inactive = subs.filter((s) => s.status === "inactive");
-  const monthlyTotal = active.reduce((sum, s) => sum + s.annualized_cost / 12, 0);
-  const annualTotal = active.reduce((sum, s) => sum + s.annualized_cost, 0);
+  const activeSubs = subs.filter((s) => s.status === "active" && s.kind === "subscription");
+  const inactiveSubs = subs.filter((s) => s.status === "inactive" && s.kind === "subscription");
+  const activeBills = subs.filter((s) => s.status === "active" && s.kind === "bill");
+  const inactiveBills = subs.filter((s) => s.status === "inactive" && s.kind === "bill");
+
+  const subsMonthly = activeSubs.reduce((sum, s) => sum + s.annualized_cost / 12, 0);
+  const billsMonthly = activeBills.reduce((sum, s) => sum + s.annualized_cost / 12, 0);
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
-        <div className="flex items-baseline justify-between">
-          <div>
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-              Total active subscriptions
-            </div>
-            <div className="mt-1 text-3xl font-semibold text-slate-900">
-              {formatCurrencyCents(monthlyTotal)}
-              <span className="ml-1 text-base font-normal text-slate-500">/mo</span>
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Annual</div>
-            <div className="mt-1 text-xl font-semibold text-slate-700">
-              {formatCurrencyCents(annualTotal)}
-            </div>
-          </div>
-        </div>
+      <div className="grid grid-cols-2 gap-4">
+        <SummaryCard label="Subscriptions" monthly={subsMonthly} count={activeSubs.length} />
+        <SummaryCard label="Recurring bills" monthly={billsMonthly} count={activeBills.length} />
       </div>
 
-      <SubTable title={`Active (${active.length})`} subs={active} />
-      {inactive.length > 0 && <SubTable title={`Inactive (${inactive.length})`} subs={inactive} muted />}
+      {activeSubs.length > 0 && (
+        <SubTable title={`Subscriptions (${activeSubs.length})`} subs={activeSubs} />
+      )}
+      {inactiveSubs.length > 0 && (
+        <SubTable title={`Inactive subscriptions (${inactiveSubs.length})`} subs={inactiveSubs} muted />
+      )}
+      {activeBills.length > 0 && (
+        <SubTable title={`Recurring bills (${activeBills.length})`} subs={activeBills} />
+      )}
+      {inactiveBills.length > 0 && (
+        <SubTable title={`Inactive bills (${inactiveBills.length})`} subs={inactiveBills} muted />
+      )}
+    </div>
+  );
+}
+
+function SummaryCard({ label, monthly, count }: { label: string; monthly: number; count: number }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-5">
+      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-1 text-3xl font-semibold text-slate-900">
+        {formatCurrencyCents(monthly)}
+        <span className="ml-1 text-base font-normal text-slate-500">/mo</span>
+      </div>
+      <div className="mt-1 text-xs text-slate-500">{count} active</div>
     </div>
   );
 }

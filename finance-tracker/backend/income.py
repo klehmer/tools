@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from models import IncomeDeposit, IncomeSource, IncomeSummary
 
@@ -35,8 +35,12 @@ _TRANSFER_KEYWORDS = (
     "payment to", "credit card payment", "loan payment",
 )
 
-# Account types whose transactions are relevant for income/spending.
-_SPENDING_ACCOUNT_TYPES = {"depository"}
+# Account types whose transactions are relevant for income detection.
+_INCOME_ACCOUNT_TYPES = {"depository"}
+# Account types whose transactions are relevant for spending.
+# Includes credit cards so purchases show up, but credit card *payments*
+# from checking are filtered out as transfers to avoid double-counting.
+_SPENDING_ACCOUNT_TYPES = {"depository", "credit"}
 
 # Used to strip trailing reference codes when deduplicating.
 _TRAILING_REF_RE = re.compile(r"\s+[A-Z0-9]{6,}$")
@@ -46,12 +50,11 @@ def _parse_date(s: str) -> datetime:
     return datetime.fromisoformat(s[:10])
 
 
-def _depository_account_ids(accounts: List[Dict]) -> Set[str]:
-    """Return the set of account_ids that belong to depository-type accounts."""
+def _account_ids_for_types(accounts: List[Dict], types: Set[str]) -> Set[str]:
     return {
         a["account_id"]
         for a in accounts
-        if (a.get("type") or "").lower() in _SPENDING_ACCOUNT_TYPES
+        if (a.get("type") or "").lower() in types
     }
 
 
@@ -135,7 +138,7 @@ def summarize_income(
     cutoff = datetime.utcnow() - timedelta(days=window_days)
 
     if accounts:
-        valid_ids = _depository_account_ids(accounts)
+        valid_ids = _account_ids_for_types(accounts, _INCOME_ACCOUNT_TYPES)
         scoped = [t for t in transactions if t.get("account_id") in valid_ids]
     else:
         scoped = transactions
@@ -187,21 +190,22 @@ def summarize_income(
     )
 
 
-def monthly_spending(
+def _get_spending_transactions(
     transactions: List[Dict],
     window_days: int = 30,
     accounts: Optional[List[Dict]] = None,
-) -> float:
+) -> List[Dict]:
+    """Return deduplicated, non-transfer outflows from spending-eligible accounts."""
     cutoff = datetime.utcnow() - timedelta(days=window_days)
 
     if accounts:
-        valid_ids = _depository_account_ids(accounts)
+        valid_ids = _account_ids_for_types(accounts, _SPENDING_ACCOUNT_TYPES)
         scoped = [t for t in transactions if t.get("account_id") in valid_ids]
     else:
         scoped = transactions
 
     scoped = _deduplicate(scoped)
-    total = 0.0
+    result = []
     for t in scoped:
         if (t.get("amount") or 0) <= 0 or t.get("pending"):
             continue
@@ -209,5 +213,85 @@ def monthly_spending(
             continue
         if _looks_like_transfer(t):
             continue
-        total += float(t["amount"])
-    return round(total, 2)
+        result.append(t)
+    return result
+
+
+def monthly_spending(
+    transactions: List[Dict],
+    window_days: int = 30,
+    accounts: Optional[List[Dict]] = None,
+) -> float:
+    spending = _get_spending_transactions(transactions, window_days, accounts)
+    return round(sum(float(t["amount"]) for t in spending), 2)
+
+
+_BUCKET_NAMES = ("subscriptions", "bills", "work_expenses", "food", "other")
+
+# Map category rule values → bucket keys
+_CATEGORY_TO_BUCKET = {
+    "subscription": "subscriptions",
+    "subscriptions": "subscriptions",
+    "bill": "bills",
+    "bills": "bills",
+    "work_expense": "work_expenses",
+    "work_expenses": "work_expenses",
+    "food": "food",
+    "other": "other",
+}
+
+
+def spending_breakdown(
+    transactions: List[Dict],
+    merchant_categories: Dict[str, str],
+    window_days: int = 30,
+    accounts: Optional[List[Dict]] = None,
+) -> Dict[str, Any]:
+    """Categorize spending into subscriptions, bills, work expenses, food, other.
+
+    ``merchant_categories`` maps normalized merchant names to a category
+    string. Both auto-detected (from subscriptions.py) and user-defined
+    rules should be merged before passing — user rules take priority.
+    """
+    spending = _get_spending_transactions(transactions, window_days, accounts)
+
+    buckets: Dict[str, List[Dict[str, Any]]] = {k: [] for k in _BUCKET_NAMES}
+    totals: Dict[str, float] = {k: 0.0 for k in _BUCKET_NAMES}
+
+    for t in spending:
+        merchant_key = _normalize_for_match(t.get("merchant_name") or t.get("name") or "")
+        raw_kind = merchant_categories.get(merchant_key, "other")
+        bucket = _CATEGORY_TO_BUCKET.get(raw_kind, "other")
+
+        entry = {
+            "date": t["date"],
+            "name": (t.get("name") or "").strip(),
+            "amount": round(float(t["amount"]), 2),
+            "merchant_key": merchant_key,
+            "category": bucket,
+        }
+        buckets[bucket].append(entry)
+        totals[bucket] += float(t["amount"])
+
+    for b in buckets.values():
+        b.sort(key=lambda x: x["date"], reverse=True)
+
+    result: Dict[str, Any] = {
+        "window_days": window_days,
+        "total": round(sum(totals.values()), 2),
+    }
+    for k in _BUCKET_NAMES:
+        result[k] = {"total": round(totals[k], 2), "transactions": buckets[k]}
+    return result
+
+
+def _normalize_for_match(name: str) -> str:
+    """Normalize a merchant name for matching against subscription merchants."""
+    n = (name or "").lower()
+    n = re.sub(r"[^a-z0-9 ]+", " ", n)
+    n = re.sub(r"\s+\d+$", "", n)
+    n = " ".join(n.split())
+    for prefix in ("sq ", "tst ", "pp ", "paypal ", "venmo ", "cashout "):
+        if n.startswith(prefix):
+            n = n[len(prefix):]
+    return n.strip()

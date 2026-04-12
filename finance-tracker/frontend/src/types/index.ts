@@ -81,6 +81,7 @@ export interface Subscription {
   annualized_cost: number;
   sample_transaction_ids: string[];
   status: "active" | "inactive";
+  kind: "subscription" | "bill";
 }
 
 export interface IncomeDeposit {
@@ -156,6 +157,31 @@ export interface StatusResponse {
   source_counts_by_kind: Record<string, number>;
   account_count: number;
   last_synced_at?: string | null;
+}
+
+export type SpendingCategory = "subscription" | "bill" | "work_expense" | "food" | "other";
+
+export interface SpendingTransaction {
+  date: string;
+  name: string;
+  amount: number;
+  merchant_key: string;
+  category: string;
+}
+
+export interface SpendingBucket {
+  total: number;
+  transactions: SpendingTransaction[];
+}
+
+export interface SpendingBreakdown {
+  window_days: number;
+  total: number;
+  subscriptions: SpendingBucket;
+  bills: SpendingBucket;
+  work_expenses: SpendingBucket;
+  food: SpendingBucket;
+  other: SpendingBucket;
 }
 
 export interface CsvImportResult {

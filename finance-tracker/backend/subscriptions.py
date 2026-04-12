@@ -1,4 +1,4 @@
-"""Detect recurring charges (subscriptions) from a list of transactions.
+"""Detect recurring charges (subscriptions & bills) from transactions.
 
 Plaid has a /transactions/recurring/get endpoint but it requires the
 ``transactions_recurring`` product. To stay portable and work with just the
@@ -7,10 +7,13 @@ base ``transactions`` product we roll our own detector:
 1. Group charges by normalized merchant name.
 2. For each group, inspect the gaps between consecutive charge dates and the
    variance of the amounts.
-3. A subscription is a merchant with 3+ charges, reasonably stable amounts
+3. A recurring charge is a merchant with 3+ charges, reasonably stable amounts
    (coefficient of variation < 0.25), and gaps that cluster around a known
    cadence (weekly / bi-weekly / monthly / quarterly / annual) within a
    tolerance.
+4. Recurring charges are classified as either "subscription" (streaming, SaaS,
+   memberships) or "bill" (utilities, insurance, municipal fees).
+5. Credit card payments and internal transfers are excluded entirely.
 """
 from __future__ import annotations
 
@@ -23,9 +26,7 @@ from typing import Dict, List, Optional, Set
 from models import Subscription
 
 
-# Only transactions from these account types can be subscriptions. Brokerage
-# buys, 401k contributions, and loan payments are recurring-looking but they
-# aren't what the user thinks of as a "subscription."
+# Only transactions from these account types are considered.
 _SUBSCRIPTION_ACCOUNT_TYPES = {"depository", "credit"}
 
 
@@ -49,13 +50,34 @@ _FREQ_MULTIPLIER = {
 _STRIP_RE = re.compile(r"[^a-z0-9 ]+")
 _NUM_TAIL_RE = re.compile(r"\s+\d+$")
 
+# Transactions matching these keywords are credit card payments or internal
+# transfers — not subscriptions or bills.
+_TRANSFER_KEYWORDS = (
+    "payment to", "payment from", "transfer", "xfer", "ach transfer",
+    "wire transfer", "autopay", "online payment", "bill pay",
+    "credit card payment", "loan payment", "payoff",
+)
+
+# Merchants matching these keywords are recurring *bills* (utilities,
+# insurance, municipal services) rather than subscriptions.
+_BILL_KEYWORDS = (
+    "electric", "gas", "water", "sewer", "utility", "utilities",
+    "muni", "municipal", "waste management", "trash", "garbage",
+    "insurance", "geico", "state farm", "allstate", "progressive",
+    "rent", "mortgage", "hoa", "homeowner",
+    "tax", "assessment",
+    "phone", "wireless", "verizon", "t-mobile", "at&t", "att ",
+    "internet", "comcast", "xfinity", "spectrum",
+    "peoples gas", "nicor", "comed", "duke energy", "pge",
+    "fee",
+)
+
 
 def _normalize_merchant(name: str) -> str:
     n = (name or "").lower()
     n = _STRIP_RE.sub(" ", n)
     n = _NUM_TAIL_RE.sub("", n)
     n = " ".join(n.split())
-    # Strip common payment-processor prefixes.
     for prefix in ("sq ", "tst ", "pp ", "paypal ", "venmo ", "cashout "):
         if n.startswith(prefix):
             n = n[len(prefix):]
@@ -64,6 +86,28 @@ def _normalize_merchant(name: str) -> str:
 
 def _parse_date(s: str) -> datetime:
     return datetime.fromisoformat(s[:10])
+
+
+def _is_transfer(t: Dict) -> bool:
+    """Check if a transaction looks like a credit card payment or transfer."""
+    categories = {c for c in (t.get("category") or [])}
+    if "Transfer" in categories or "Payment" in categories:
+        return True
+    name = ((t.get("name") or "") + " " + (t.get("merchant_name") or "")).lower()
+    return any(k in name for k in _TRANSFER_KEYWORDS)
+
+
+def _classify_kind(merchant: str, sample_txns: List[Dict]) -> str:
+    """Classify a recurring charge as 'subscription' or 'bill'."""
+    # Check the normalized merchant name and raw transaction names.
+    texts = [merchant.lower()]
+    for t in sample_txns[:5]:
+        texts.append((t.get("name") or "").lower())
+        texts.append((t.get("merchant_name") or "").lower())
+    joined = " ".join(texts)
+    if any(k in joined for k in _BILL_KEYWORDS):
+        return "bill"
+    return "subscription"
 
 
 def _classify_cadence(gaps_days: List[float]) -> str:
@@ -80,8 +124,7 @@ def detect_subscriptions(
     transactions: List[Dict],
     accounts: Optional[List[Dict]] = None,
 ) -> List[Subscription]:
-    # Scope to depository + credit accounts. Investment/brokerage/loan
-    # transactions create false positives (recurring buys, interest payments).
+    # Scope to depository + credit accounts.
     if accounts:
         valid_ids: Optional[Set[str]] = {
             a["account_id"]
@@ -91,13 +134,14 @@ def detect_subscriptions(
     else:
         valid_ids = None
 
-    # Only consider outflows (positive amounts in Plaid's sign convention).
+    # Only consider outflows that aren't transfers.
     outflows = [
         t
         for t in transactions
         if (t.get("amount") or 0) > 0
         and not t.get("pending")
         and (valid_ids is None or t.get("account_id") in valid_ids)
+        and not _is_transfer(t)
     ]
     groups: Dict[str, List[Dict]] = defaultdict(list)
     for t in outflows:
@@ -131,8 +175,8 @@ def detect_subscriptions(
         target_gap = next((t for n, t, _ in _CADENCES if n == cadence), 30)
         next_expected = last + timedelta(days=target_gap)
 
-        # Mark as inactive if the last charge is more than two cycles old.
         status = "active" if (datetime.utcnow() - last).days <= target_gap * 2 else "inactive"
+        kind = _classify_kind(merchant, txns)
 
         subs.append(
             Subscription(
@@ -145,6 +189,7 @@ def detect_subscriptions(
                 annualized_cost=round(avg_amt * _FREQ_MULTIPLIER[cadence], 2),
                 sample_transaction_ids=[t["transaction_id"] for t in txns[-5:]],
                 status=status,  # type: ignore[arg-type]
+                kind=kind,  # type: ignore[arg-type]
             )
         )
 

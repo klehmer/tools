@@ -16,6 +16,7 @@ export default defineConfig({
       "/networth": "http://localhost:8000",
       "/subscriptions": "http://localhost:8000",
       "/income": "http://localhost:8000",
+      "/spending": "http://localhost:8000",
       "/dashboard": "http://localhost:8000",
       "/goals": "http://localhost:8000",
       "/plan": "http://localhost:8000",

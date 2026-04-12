@@ -24,9 +24,10 @@ from fastapi.middleware.cors import CORSMiddleware
 import manual
 import simplefin_client
 import storage
-from income import monthly_spending, summarize_income
+from income import monthly_spending, spending_breakdown, summarize_income
 from models import (
     Account,
+    CategoryRuleRequest,
     CsvImportResult,
     DashboardSummary,
     ExchangeTokenRequest,
@@ -466,6 +467,43 @@ def income(window_days: int = Query(90, ge=30, le=365)):
     return summarize_income(storage.list_transactions(), window_days=window_days, accounts=storage.list_accounts())
 
 
+@app.get("/spending")
+def spending(window_days: int = Query(30, ge=7, le=365)):
+    accs = storage.list_accounts()
+    txns = storage.list_transactions()
+    subs = detect_subscriptions(txns, accounts=accs)
+    # Build auto-detected merchant categories, then overlay user rules
+    from subscriptions import _normalize_merchant
+    categories: dict = {}
+    for s in subs:
+        key = _normalize_merchant(s.merchant)
+        categories[key] = "subscription" if s.kind == "subscription" else "bill"
+    # User rules take priority over auto-detection
+    categories.update(storage.get_category_rules())
+    return spending_breakdown(txns, categories, window_days=window_days, accounts=accs)
+
+
+@app.put("/spending/categorize")
+def categorize_merchant(req: CategoryRuleRequest):
+    from income import _normalize_for_match
+    key = _normalize_for_match(req.merchant_name)
+    if not key:
+        raise HTTPException(status_code=400, detail="merchant name is empty")
+    storage.save_category_rule(key, req.category)
+    return {"ok": True, "merchant": key, "category": req.category}
+
+
+@app.get("/spending/rules")
+def get_category_rules():
+    return storage.get_category_rules()
+
+
+@app.delete("/spending/rules/{merchant}")
+def delete_category_rule(merchant: str):
+    storage.delete_category_rule(merchant)
+    return {"ok": True}
+
+
 @app.get("/dashboard", response_model=DashboardSummary)
 def dashboard():
     accounts = storage.list_accounts()
@@ -474,7 +512,8 @@ def dashboard():
     nw = compute_net_worth(accounts)
     inc = summarize_income(txns, window_days=90, accounts=accounts)
     subs = detect_subscriptions(txns, accounts=accounts)
-    subs_total = round(sum(s.annualized_cost / 12.0 for s in subs if s.status == "active"), 2)
+    active_subs = [s for s in subs if s.status == "active" and s.kind == "subscription"]
+    subs_total = round(sum(s.annualized_cost / 12.0 for s in active_subs), 2)
     spending = monthly_spending(txns, accounts=accounts)
     last = max((s.get("last_synced_at") or "" for s in sources), default=None) or None
     kind_counts: dict = {}
@@ -485,7 +524,7 @@ def dashboard():
         monthly_income=inc.total_monthly,
         monthly_spending=spending,
         monthly_subscriptions_total=subs_total,
-        subscription_count=len([s for s in subs if s.status == "active"]),
+        subscription_count=len(active_subs),
         linked_source_count=len(sources),
         source_counts_by_kind=kind_counts,
         account_count=len(accounts),
@@ -518,7 +557,7 @@ def plan(req: PlanRequest):
     accs = storage.list_accounts()
     inc = summarize_income(txns, window_days=90, accounts=accs)
     subs = detect_subscriptions(txns, accounts=accs)
-    subs_total = sum(s.annualized_cost / 12.0 for s in subs if s.status == "active")
+    subs_total = sum(s.annualized_cost / 12.0 for s in subs if s.status == "active" and s.kind == "subscription")
     spending = monthly_spending(txns, accounts=accs)
     return build_plan(
         goals=req.goals,

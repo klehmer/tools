@@ -158,6 +158,14 @@ class NetWorthSnapshot(BaseModel):
 
 # --- Subscriptions -----------------------------------------------------------
 
+SpendingCategory = Literal["subscription", "bill", "work_expense", "food", "other"]
+
+
+class CategoryRuleRequest(BaseModel):
+    merchant_name: str
+    category: SpendingCategory
+
+
 class Subscription(BaseModel):
     id: str
     merchant: str
@@ -168,6 +176,7 @@ class Subscription(BaseModel):
     annualized_cost: float
     sample_transaction_ids: List[str] = Field(default_factory=list)
     status: Literal["active", "inactive"] = "active"
+    kind: Literal["subscription", "bill"] = "subscription"
 
 
 # --- Income ------------------------------------------------------------------

@@ -31,6 +31,7 @@ INVESTMENTS_FILE = DATA_DIR / "investments.json"
 LIABILITIES_FILE = DATA_DIR / "liabilities.json"
 GOALS_FILE = DATA_DIR / "goals.json"
 META_FILE = DATA_DIR / "meta.json"
+CATEGORY_RULES_FILE = DATA_DIR / "category_rules.json"
 
 # One-time migration from the old Plaid-only layout.
 LEGACY_ITEMS_FILE = DATA_DIR / "items.json"
@@ -402,3 +403,25 @@ def set_meta(**fields: Any) -> Dict[str, Any]:
         meta.update(fields)
         _write(META_FILE, meta)
         return meta
+
+
+# --- Category rules ----------------------------------------------------------
+
+def get_category_rules() -> Dict[str, str]:
+    with _lock:
+        return _read(CATEGORY_RULES_FILE, {})
+
+
+def save_category_rule(merchant: str, category: str) -> Dict[str, str]:
+    with _lock:
+        rules = get_category_rules()
+        rules[merchant] = category
+        _write(CATEGORY_RULES_FILE, rules)
+        return rules
+
+
+def delete_category_rule(merchant: str) -> None:
+    with _lock:
+        rules = get_category_rules()
+        rules.pop(merchant, None)
+        _write(CATEGORY_RULES_FILE, rules)

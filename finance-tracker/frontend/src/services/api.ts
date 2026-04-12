@@ -8,6 +8,8 @@ import type {
   NetWorthSnapshot,
   PlanResponse,
   Source,
+  SpendingBreakdown,
+  SpendingCategory,
   StatusResponse,
   Subscription,
   Transaction,
@@ -127,6 +129,13 @@ export const api = {
   subscriptions: () => request<Subscription[]>("/subscriptions"),
   income: (windowDays = 90) =>
     request<IncomeSummary>(`/income?window_days=${windowDays}`),
+  spending: (windowDays = 30) =>
+    request<SpendingBreakdown>(`/spending?window_days=${windowDays}`),
+  categorize: (merchant_name: string, category: SpendingCategory) =>
+    request<{ ok: boolean }>("/spending/categorize", {
+      method: "PUT",
+      body: JSON.stringify({ merchant_name, category }),
+    }),
 
   // --- Goals
   listGoals: () => request<Goal[]>("/goals"),
