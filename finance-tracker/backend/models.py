@@ -247,13 +247,35 @@ class PlanResponse(BaseModel):
 
 # --- Dashboard ---------------------------------------------------------------
 
+class PeriodProjection(BaseModel):
+    monthly: float
+    quarterly: float
+    annual: float
+
+
 class DashboardSummary(BaseModel):
     net_worth: NetWorthSnapshot
-    monthly_income: float
-    monthly_spending: float
-    monthly_subscriptions_total: float
+    income: PeriodProjection
+    spending: PeriodProjection
+    subscriptions: PeriodProjection
+    bills: PeriodProjection
+    cash_flow: PeriodProjection
     subscription_count: int
+    bill_count: int
     linked_source_count: int
     source_counts_by_kind: Dict[str, int]
     account_count: int
     last_synced_at: Optional[str] = None
+
+    # Keep legacy fields so existing frontend doesn't break during rollout
+    @property
+    def monthly_income(self) -> float:
+        return self.income.monthly
+
+    @property
+    def monthly_spending(self) -> float:
+        return self.spending.monthly
+
+    @property
+    def monthly_subscriptions_total(self) -> float:
+        return self.subscriptions.monthly

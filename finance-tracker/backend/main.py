@@ -29,6 +29,7 @@ from models import (
     Account,
     CategoryRuleRequest,
     FrequencyRuleRequest,
+    PeriodProjection,
     CsvImportResult,
     DashboardSummary,
     ExchangeTokenRequest,
@@ -547,8 +548,22 @@ def dashboard():
     breakdown = spending_breakdown(txns, categories, window_days=90, accounts=accounts, frequency_rules=freq_rules)
 
     subs_monthly = breakdown["subscriptions"].get("monthly_equivalent", 0.0)
+    bills_monthly = breakdown["bills"].get("monthly_equivalent", 0.0)
     sub_merchants = {t["merchant_key"] for t in breakdown["subscriptions"]["transactions"]}
+    bill_merchants = {t["merchant_key"] for t in breakdown["bills"]["transactions"]}
     spending_total = monthly_spending(txns, accounts=accounts)
+
+    income_mo = inc.total_monthly
+    spending_mo = spending_total
+
+    def _proj(monthly: float) -> PeriodProjection:
+        return PeriodProjection(
+            monthly=round(monthly, 2),
+            quarterly=round(monthly * 3, 2),
+            annual=round(monthly * 12, 2),
+        )
+
+    cash_flow_mo = income_mo - spending_mo
 
     last = max((s.get("last_synced_at") or "" for s in sources), default=None) or None
     kind_counts: dict = {}
@@ -556,10 +571,13 @@ def dashboard():
         kind_counts[s.get("kind", "unknown")] = kind_counts.get(s.get("kind", "unknown"), 0) + 1
     return DashboardSummary(
         net_worth=nw,
-        monthly_income=inc.total_monthly,
-        monthly_spending=spending_total,
-        monthly_subscriptions_total=round(subs_monthly, 2),
+        income=_proj(income_mo),
+        spending=_proj(spending_mo),
+        subscriptions=_proj(subs_monthly),
+        bills=_proj(bills_monthly),
+        cash_flow=_proj(cash_flow_mo),
         subscription_count=len(sub_merchants),
+        bill_count=len(bill_merchants),
         linked_source_count=len(sources),
         source_counts_by_kind=kind_counts,
         account_count=len(accounts),

@@ -3,12 +3,13 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   PiggyBank,
+  Receipt,
   Repeat,
   TrendingUp,
   Wallet,
 } from "lucide-react";
 import { api, formatCurrency } from "../services/api";
-import type { DashboardSummary } from "../types";
+import type { DashboardSummary, PeriodProjection } from "../types";
 
 export function DashboardPanel() {
   const [data, setData] = useState<DashboardSummary | null>(null);
@@ -21,11 +22,10 @@ export function DashboardPanel() {
   if (error) return <div className="text-rose-600">Error: {error}</div>;
   if (!data) return <div className="text-slate-500">Loading dashboard…</div>;
 
-  const cashflow = data.monthly_income - data.monthly_spending;
-
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {/* Top stat cards */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         <StatCard
           icon={<TrendingUp className="h-5 w-5" />}
           label="Net worth"
@@ -38,26 +38,76 @@ export function DashboardPanel() {
         <StatCard
           icon={<ArrowUpRight className="h-5 w-5" />}
           label="Monthly income"
-          value={formatCurrency(data.monthly_income)}
-          sub="trailing 90-day avg"
+          value={formatCurrency(data.income.monthly)}
+          sub={`${formatCurrency(data.income.annual)}/yr`}
           tone="sky"
         />
         <StatCard
           icon={<ArrowDownRight className="h-5 w-5" />}
-          label="Monthly spending"
-          value={formatCurrency(data.monthly_spending)}
-          sub={`${cashflow >= 0 ? "+" : ""}${formatCurrency(cashflow)}/mo cash flow`}
-          tone={cashflow >= 0 ? "emerald" : "rose"}
-        />
-        <StatCard
-          icon={<Repeat className="h-5 w-5" />}
-          label="Subscriptions"
-          value={formatCurrency(data.monthly_subscriptions_total)}
-          sub={`${data.subscription_count} active`}
-          tone="violet"
+          label="Monthly cash flow"
+          value={`${data.cash_flow.monthly >= 0 ? "+" : ""}${formatCurrency(data.cash_flow.monthly)}`}
+          sub={`${data.cash_flow.annual >= 0 ? "+" : ""}${formatCurrency(data.cash_flow.annual)}/yr`}
+          tone={data.cash_flow.monthly >= 0 ? "emerald" : "rose"}
         />
       </div>
 
+      {/* Financial projections table */}
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="mb-4 text-sm font-semibold text-slate-700">Financial projections</h3>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
+              <th className="pb-2 text-left font-medium">Category</th>
+              <th className="pb-2 text-right font-medium">Monthly</th>
+              <th className="pb-2 text-right font-medium">Quarterly</th>
+              <th className="pb-2 text-right font-medium">Annual</th>
+            </tr>
+          </thead>
+          <tbody>
+            <ProjectionRow
+              label="Income"
+              icon={<ArrowUpRight className="h-3.5 w-3.5 text-sky-500" />}
+              proj={data.income}
+              tone="text-sky-700"
+            />
+            <ProjectionRow
+              label="Total spending"
+              icon={<ArrowDownRight className="h-3.5 w-3.5 text-rose-500" />}
+              proj={data.spending}
+              tone="text-rose-700"
+              prefix="-"
+            />
+            <ProjectionRow
+              label={`Subscriptions (${data.subscription_count})`}
+              icon={<Repeat className="h-3.5 w-3.5 text-violet-500" />}
+              proj={data.subscriptions}
+              tone="text-violet-700"
+              indent
+            />
+            <ProjectionRow
+              label={`Bills (${data.bill_count})`}
+              icon={<Receipt className="h-3.5 w-3.5 text-amber-500" />}
+              proj={data.bills}
+              tone="text-amber-700"
+              indent
+            />
+            <tr className="border-t border-slate-200">
+              <td className="py-2 font-semibold text-slate-900">Cash flow</td>
+              <td className={`py-2 text-right font-semibold tabular-nums ${data.cash_flow.monthly >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                {data.cash_flow.monthly >= 0 ? "+" : ""}{formatCurrency(data.cash_flow.monthly)}
+              </td>
+              <td className={`py-2 text-right font-semibold tabular-nums ${data.cash_flow.quarterly >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                {data.cash_flow.quarterly >= 0 ? "+" : ""}{formatCurrency(data.cash_flow.quarterly)}
+              </td>
+              <td className={`py-2 text-right font-semibold tabular-nums ${data.cash_flow.annual >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                {data.cash_flow.annual >= 0 ? "+" : ""}{formatCurrency(data.cash_flow.annual)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Assets / Liabilities breakdown */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-white p-5">
           <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
@@ -70,7 +120,7 @@ export function DashboardPanel() {
             <PiggyBank className="h-4 w-4" /> Liabilities
           </h3>
           {data.net_worth.liabilities.length === 0 ? (
-            <div className="text-sm text-slate-500">No debt on file. </div>
+            <div className="text-sm text-slate-500">No debt on file.</div>
           ) : (
             <BucketList
               items={data.net_worth.liabilities}
@@ -90,6 +140,37 @@ export function DashboardPanel() {
           : "never synced"}
       </div>
     </div>
+  );
+}
+
+function ProjectionRow({
+  label,
+  icon,
+  proj,
+  tone,
+  prefix,
+  indent,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  proj: PeriodProjection;
+  tone: string;
+  prefix?: string;
+  indent?: boolean;
+}) {
+  const fmt = (v: number) => `${prefix ?? ""}${formatCurrency(v)}`;
+  return (
+    <tr className="border-t border-slate-50">
+      <td className={`py-2 ${indent ? "pl-6" : ""}`}>
+        <span className="flex items-center gap-1.5">
+          {icon}
+          <span className={`font-medium ${indent ? "text-slate-600 text-xs" : "text-slate-700"}`}>{label}</span>
+        </span>
+      </td>
+      <td className={`py-2 text-right tabular-nums ${tone}`}>{fmt(proj.monthly)}</td>
+      <td className={`py-2 text-right tabular-nums ${tone}`}>{fmt(proj.quarterly)}</td>
+      <td className={`py-2 text-right tabular-nums ${tone}`}>{fmt(proj.annual)}</td>
+    </tr>
   );
 }
 

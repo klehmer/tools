@@ -135,12 +135,21 @@ export interface PlanResponse {
   summary: string;
 }
 
+export interface PeriodProjection {
+  monthly: number;
+  quarterly: number;
+  annual: number;
+}
+
 export interface DashboardSummary {
   net_worth: NetWorthSnapshot;
-  monthly_income: number;
-  monthly_spending: number;
-  monthly_subscriptions_total: number;
+  income: PeriodProjection;
+  spending: PeriodProjection;
+  subscriptions: PeriodProjection;
+  bills: PeriodProjection;
+  cash_flow: PeriodProjection;
   subscription_count: number;
+  bill_count: number;
   linked_source_count: number;
   source_counts_by_kind: Record<string, number>;
   account_count: number;
