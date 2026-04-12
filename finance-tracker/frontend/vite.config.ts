@@ -7,8 +7,9 @@ export default defineConfig({
     port: 5175,
     proxy: {
       "/status": "http://localhost:8000",
+      "/config": "http://localhost:8000",
       "/link": "http://localhost:8000",
-      "/items": "http://localhost:8000",
+      "/sources": "http://localhost:8000",
       "/sync": "http://localhost:8000",
       "/accounts": "http://localhost:8000",
       "/transactions": "http://localhost:8000",

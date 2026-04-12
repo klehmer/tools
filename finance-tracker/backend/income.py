@@ -1,20 +1,91 @@
-"""Income and spending analytics derived from synced transactions."""
+"""Income and spending analytics derived from synced transactions.
+
+Only transactions from depository-type accounts (checking, savings, cash
+management) are considered. Investment/brokerage buys, 401k contributions,
+and loan payments look like spending but aren't — they distort the numbers.
+
+SimpleFIN sometimes surfaces the same underlying bank transaction across
+multiple sub-accounts (e.g. "Spend" and "Reserve" buckets at the same
+bank). We deduplicate by (date, amount, normalized name) before counting.
+"""
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Dict, List
+from typing import Dict, List, Optional, Set
 
-from models import IncomeSource, IncomeSummary
+from models import IncomeDeposit, IncomeSource, IncomeSummary
 
 
 # Plaid categories that strongly indicate paycheck / income deposits.
 _INCOME_CATEGORIES = {"Payroll", "Transfer", "Deposit", "Interest Earned"}
-_PAYROLL_KEYWORDS = ("payroll", "direct dep", "direct deposit", "salary", "wages", "paycheck")
+_PAYROLL_KEYWORDS = (
+    "payroll", "direct dep", "direct deposit", "salary", "wages", "paycheck",
+    "employer", "compensation", "ach deposit",
+)
+
+# Keywords that signal internal transfers between the user's own accounts,
+# which should NOT be counted as income or spending. These catch transfers
+# that lack Plaid categories (SimpleFIN / CSV imports).
+_TRANSFER_KEYWORDS = (
+    "transfer", "xfer", "ach transfer", "wire transfer", "zelle",
+    "venmo", "cashapp", "paypal transfer", "payment thank you",
+    "autopay", "online payment", "bill pay", "payment from",
+    "payment to", "credit card payment", "loan payment",
+)
+
+# Account types whose transactions are relevant for income/spending.
+_SPENDING_ACCOUNT_TYPES = {"depository"}
+
+# Used to strip trailing reference codes when deduplicating.
+_TRAILING_REF_RE = re.compile(r"\s+[A-Z0-9]{6,}$")
 
 
 def _parse_date(s: str) -> datetime:
     return datetime.fromisoformat(s[:10])
+
+
+def _depository_account_ids(accounts: List[Dict]) -> Set[str]:
+    """Return the set of account_ids that belong to depository-type accounts."""
+    return {
+        a["account_id"]
+        for a in accounts
+        if (a.get("type") or "").lower() in _SPENDING_ACCOUNT_TYPES
+    }
+
+
+def _dedup_key(t: Dict) -> str:
+    """Build a key that matches the same real-world transaction across accounts.
+
+    SimpleFIN can report the same ACH credit/debit on multiple sub-accounts
+    at the same bank. We collapse them by (date, amount, name-without-ref).
+    """
+    name = (t.get("name") or "").strip()
+    # Strip trailing alphanumeric reference codes that vary per sub-account
+    name = _TRAILING_REF_RE.sub("", name).lower()
+    return f"{t.get('date', '')}|{float(t.get('amount', 0)):.2f}|{name}"
+
+
+def _deduplicate(transactions: List[Dict]) -> List[Dict]:
+    """Remove duplicate transactions that appear across sub-accounts."""
+    seen: Dict[str, Dict] = {}
+    for t in transactions:
+        key = _dedup_key(t)
+        if key not in seen:
+            seen[key] = t
+    return list(seen.values())
+
+
+def _looks_like_transfer(t: Dict) -> bool:
+    """Heuristic: does this transaction look like an internal transfer?"""
+    # Plaid categories tell us directly.
+    categories = {c for c in (t.get("category") or [])}
+    if "Transfer" in categories or "Payment" in categories:
+        return True
+    # Fall back to name matching (SimpleFIN / CSV have no categories).
+    name = ((t.get("name") or "") + " " + (t.get("merchant_name") or "")).lower()
+    return any(k in name for k in _TRANSFER_KEYWORDS)
 
 
 def _is_income(t: Dict) -> bool:
@@ -34,9 +105,43 @@ def _is_income(t: Dict) -> bool:
     return any(k in name for k in _PAYROLL_KEYWORDS)
 
 
-def summarize_income(transactions: List[Dict], window_days: int = 90) -> IncomeSummary:
+def _estimate_monthly(txns: List[Dict], avg_amount: float, window_days: int) -> float:
+    """Estimate monthly income from a group of same-source transactions.
+
+    With 2+ transactions we detect the cadence from the gaps between them
+    (e.g. ~14 days → biweekly → ~2.14 per month). With only 1 transaction
+    we fall back to dividing by the window in months.
+    """
+    if len(txns) < 2:
+        months = max(window_days / 30.0, 1.0)
+        return avg_amount / months
+
+    dates = sorted(_parse_date(t["date"]) for t in txns)
+    gaps = [(dates[i] - dates[i - 1]).days for i in range(1, len(dates))]
+    avg_gap = sum(gaps) / len(gaps)
+
+    if avg_gap <= 0:
+        avg_gap = 30.0
+
+    payments_per_month = 30.0 / avg_gap
+    return avg_amount * payments_per_month
+
+
+def summarize_income(
+    transactions: List[Dict],
+    window_days: int = 90,
+    accounts: Optional[List[Dict]] = None,
+) -> IncomeSummary:
     cutoff = datetime.utcnow() - timedelta(days=window_days)
-    income = [t for t in transactions if _is_income(t) and _parse_date(t["date"]) >= cutoff]
+
+    if accounts:
+        valid_ids = _depository_account_ids(accounts)
+        scoped = [t for t in transactions if t.get("account_id") in valid_ids]
+    else:
+        scoped = transactions
+
+    scoped = _deduplicate(scoped)
+    income = [t for t in scoped if _is_income(t) and _parse_date(t["date"]) >= cutoff]
 
     groups: Dict[str, List[Dict]] = defaultdict(list)
     for t in income:
@@ -45,12 +150,23 @@ def summarize_income(transactions: List[Dict], window_days: int = 90) -> IncomeS
 
     sources: List[IncomeSource] = []
     total_monthly = 0.0
-    months = max(window_days / 30.0, 1.0)
 
     for name, txns in groups.items():
-        total = -sum(float(t["amount"]) for t in txns)  # flip sign to positive
-        monthly = total / months
+        avg_amount = -sum(float(t["amount"]) for t in txns) / len(txns)
+        monthly = _estimate_monthly(txns, avg_amount, window_days)
         last = max(txns, key=lambda t: t["date"])
+        deposits = sorted(
+            [
+                IncomeDeposit(
+                    date=t["date"],
+                    amount=round(-float(t["amount"]), 2),
+                    description=(t.get("name") or "").strip(),
+                )
+                for t in txns
+            ],
+            key=lambda d: d.date,
+            reverse=True,
+        )
         sources.append(
             IncomeSource(
                 name=name,
@@ -58,6 +174,7 @@ def summarize_income(transactions: List[Dict], window_days: int = 90) -> IncomeS
                 last_payment_date=str(last.get("date")),
                 last_payment_amount=round(-float(last["amount"]), 2),
                 transaction_count=len(txns),
+                deposits=deposits,
             )
         )
         total_monthly += monthly
@@ -70,17 +187,27 @@ def summarize_income(transactions: List[Dict], window_days: int = 90) -> IncomeS
     )
 
 
-def monthly_spending(transactions: List[Dict], window_days: int = 30) -> float:
+def monthly_spending(
+    transactions: List[Dict],
+    window_days: int = 30,
+    accounts: Optional[List[Dict]] = None,
+) -> float:
     cutoff = datetime.utcnow() - timedelta(days=window_days)
+
+    if accounts:
+        valid_ids = _depository_account_ids(accounts)
+        scoped = [t for t in transactions if t.get("account_id") in valid_ids]
+    else:
+        scoped = transactions
+
+    scoped = _deduplicate(scoped)
     total = 0.0
-    for t in transactions:
+    for t in scoped:
         if (t.get("amount") or 0) <= 0 or t.get("pending"):
             continue
         if _parse_date(t["date"]) < cutoff:
             continue
-        categories = {c for c in (t.get("category") or [])}
-        # Skip internal transfers / credit card payments so we don't double-count.
-        if "Transfer" in categories or "Payment" in categories:
+        if _looks_like_transfer(t):
             continue
         total += float(t["amount"])
     return round(total, 2)

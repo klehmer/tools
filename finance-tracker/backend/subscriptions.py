@@ -18,9 +18,15 @@ import re
 from collections import defaultdict
 from datetime import datetime, timedelta
 from statistics import mean, pstdev
-from typing import Dict, List
+from typing import Dict, List, Optional, Set
 
 from models import Subscription
+
+
+# Only transactions from these account types can be subscriptions. Brokerage
+# buys, 401k contributions, and loan payments are recurring-looking but they
+# aren't what the user thinks of as a "subscription."
+_SUBSCRIPTION_ACCOUNT_TYPES = {"depository", "credit"}
 
 
 _CADENCES = [
@@ -70,9 +76,29 @@ def _classify_cadence(gaps_days: List[float]) -> str:
     return "irregular"
 
 
-def detect_subscriptions(transactions: List[Dict]) -> List[Subscription]:
+def detect_subscriptions(
+    transactions: List[Dict],
+    accounts: Optional[List[Dict]] = None,
+) -> List[Subscription]:
+    # Scope to depository + credit accounts. Investment/brokerage/loan
+    # transactions create false positives (recurring buys, interest payments).
+    if accounts:
+        valid_ids: Optional[Set[str]] = {
+            a["account_id"]
+            for a in accounts
+            if (a.get("type") or "").lower() in _SUBSCRIPTION_ACCOUNT_TYPES
+        }
+    else:
+        valid_ids = None
+
     # Only consider outflows (positive amounts in Plaid's sign convention).
-    outflows = [t for t in transactions if (t.get("amount") or 0) > 0 and not t.get("pending")]
+    outflows = [
+        t
+        for t in transactions
+        if (t.get("amount") or 0) > 0
+        and not t.get("pending")
+        and (valid_ids is None or t.get("account_id") in valid_ids)
+    ]
     groups: Dict[str, List[Dict]] = defaultdict(list)
     for t in outflows:
         key = _normalize_merchant(t.get("merchant_name") or t.get("name") or "")

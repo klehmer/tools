@@ -8,13 +8,23 @@ interface Props {
   disabled?: boolean;
 }
 
+/**
+ * Outer wrapper: fetches a Plaid link token first, then mounts the inner
+ * component that actually calls `usePlaidLink`. This matters because
+ * react-plaid-link@3 throws if it's initialised with a null/undefined token.
+ */
 export function LinkAccountButton({ onLinked, disabled }: Props) {
   const [linkToken, setLinkToken] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (disabled) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
+    setLoading(true);
     setError(null);
     api
       .createLinkToken()
@@ -23,15 +33,52 @@ export function LinkAccountButton({ onLinked, disabled }: Props) {
       })
       .catch((e) => {
         if (!cancelled) setError(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [disabled]);
+
+  if (error) {
+    return (
+      <button
+        type="button"
+        disabled
+        title={error}
+        className="inline-flex items-center gap-2 rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-500"
+      >
+        <Link2 className="h-4 w-4" />
+        Link unavailable
+      </button>
+    );
+  }
+
+  if (loading || disabled || !linkToken) {
+    return (
+      <button
+        type="button"
+        disabled
+        className="inline-flex items-center gap-2 rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-500"
+      >
+        <Link2 className="h-4 w-4" />
+        {disabled ? "Link an account" : "Preparing…"}
+      </button>
+    );
+  }
+
+  return <LinkInner token={linkToken} onLinked={onLinked} />;
+}
+
+function LinkInner({ token, onLinked }: { token: string; onLinked: () => void }) {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const onSuccess = useCallback(
     async (public_token: string, metadata: any) => {
-      setLoading(true);
+      setSubmitting(true);
       try {
         await api.exchangePublicToken(
           public_token,
@@ -42,29 +89,26 @@ export function LinkAccountButton({ onLinked, disabled }: Props) {
       } catch (e: any) {
         setError(e.message);
       } finally {
-        setLoading(false);
+        setSubmitting(false);
       }
     },
     [onLinked]
   );
 
-  const { open, ready } = usePlaidLink({
-    token: linkToken,
-    onSuccess,
-  });
+  const { open, ready } = usePlaidLink({ token, onSuccess });
 
   return (
     <div className="flex flex-col items-end gap-1">
       <button
         type="button"
-        disabled={disabled || !ready || !linkToken || loading}
+        disabled={!ready || submitting}
         onClick={() => open()}
         className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
       >
         <Link2 className="h-4 w-4" />
-        {loading ? "Linking…" : "Link an account"}
+        {submitting ? "Linking…" : "Link an account"}
       </button>
-      {error && <span className="text-xs text-rose-600">{error}</span>}
+      {error && <span className="max-w-xs text-right text-xs text-rose-600">{error}</span>}
     </div>
   );
 }

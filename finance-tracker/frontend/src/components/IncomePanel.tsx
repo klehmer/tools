@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { api, formatCurrencyCents } from "../services/api";
-import type { IncomeSummary } from "../types";
+import type { IncomeSummary, IncomeSource } from "../types";
 
 export function IncomePanel() {
   const [windowDays, setWindowDays] = useState(90);
@@ -48,34 +49,64 @@ export function IncomePanel() {
           No income-like deposits detected in this window.
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-xs uppercase tracking-wide text-slate-500">
-                <th className="px-5 py-2 text-left font-medium">Source</th>
-                <th className="px-5 py-2 text-left font-medium">Last deposit</th>
-                <th className="px-5 py-2 text-right font-medium">Last amount</th>
-                <th className="px-5 py-2 text-right font-medium">Avg monthly</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.sources.map((s) => (
-                <tr key={s.name} className="border-t border-slate-100">
-                  <td className="px-5 py-2 font-medium">{s.name}</td>
-                  <td className="px-5 py-2 text-slate-600">{s.last_payment_date || "—"}</td>
-                  <td className="px-5 py-2 text-right tabular-nums">
-                    {s.last_payment_amount != null
-                      ? formatCurrencyCents(s.last_payment_amount)
-                      : "—"}
-                  </td>
-                  <td className="px-5 py-2 text-right font-semibold tabular-nums">
-                    {formatCurrencyCents(s.average_monthly)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-3">
+          {data.sources.map((s) => (
+            <SourceCard key={s.name} source={s} />
+          ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+function SourceCard({ source }: { source: IncomeSource }) {
+  const [expanded, setExpanded] = useState(true);
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center justify-between px-5 py-3 text-left hover:bg-slate-50"
+      >
+        <div className="flex items-center gap-2">
+          {expanded ? (
+            <ChevronDown className="h-4 w-4 text-slate-400" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-slate-400" />
+          )}
+          <span className="text-sm font-semibold text-slate-900">{source.name}</span>
+          <span className="text-xs text-slate-500">
+            {source.transaction_count} deposit{source.transaction_count === 1 ? "" : "s"}
+          </span>
+        </div>
+        <span className="text-sm font-semibold tabular-nums text-slate-900">
+          {formatCurrencyCents(source.average_monthly)}
+          <span className="ml-1 text-xs font-normal text-slate-500">/mo</span>
+        </span>
+      </button>
+
+      {expanded && (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-t border-slate-100 text-xs uppercase tracking-wide text-slate-400">
+              <th className="px-5 py-1.5 text-left font-medium">Date</th>
+              <th className="px-5 py-1.5 text-left font-medium">Description</th>
+              <th className="px-5 py-1.5 text-right font-medium">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {source.deposits.map((d, i) => (
+              <tr key={i} className="border-t border-slate-50">
+                <td className="px-5 py-2 tabular-nums text-slate-600">{d.date}</td>
+                <td className="px-5 py-2 text-slate-600 truncate max-w-xs">{d.description}</td>
+                <td className="px-5 py-2 text-right tabular-nums font-medium text-emerald-700">
+                  {formatCurrencyCents(d.amount)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
   );

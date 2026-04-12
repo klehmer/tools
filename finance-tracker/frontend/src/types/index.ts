@@ -1,6 +1,19 @@
+export type SourceKind = "plaid" | "simplefin" | "manual";
+
+export interface Source {
+  source_id: string;
+  kind: SourceKind;
+  display_name: string;
+  linked_at: string;
+  last_synced_at?: string | null;
+  account_count: number;
+  error?: string | null;
+}
+
 export interface Account {
   account_id: string;
-  item_id: string;
+  source_id: string;
+  source_kind: SourceKind;
   institution_name?: string | null;
   name: string;
   official_name?: string | null;
@@ -10,16 +23,17 @@ export interface Account {
   current_balance: number;
   available_balance?: number | null;
   iso_currency_code?: string | null;
+  manual: boolean;
 }
 
-export interface LinkedItem {
-  item_id: string;
+export interface ManualAccountInput {
+  name: string;
+  type: "depository" | "investment" | "credit" | "loan" | "brokerage" | "other";
+  subtype?: string | null;
+  current_balance: number;
+  iso_currency_code?: string;
   institution_name?: string | null;
-  institution_id?: string | null;
-  linked_at: string;
-  last_synced_at?: string | null;
-  account_count: number;
-  error?: string | null;
+  mask?: string | null;
 }
 
 export interface AssetBucket {
@@ -46,7 +60,7 @@ export interface NetWorthSnapshot {
 export interface Transaction {
   transaction_id: string;
   account_id: string;
-  item_id: string;
+  source_id: string;
   date: string;
   name: string;
   merchant_name?: string | null;
@@ -69,12 +83,19 @@ export interface Subscription {
   status: "active" | "inactive";
 }
 
+export interface IncomeDeposit {
+  date: string;
+  amount: number;
+  description: string;
+}
+
 export interface IncomeSource {
   name: string;
   average_monthly: number;
   last_payment_date?: string | null;
   last_payment_amount?: number | null;
   transaction_count: number;
+  deposits: IncomeDeposit[];
 }
 
 export interface IncomeSummary {
@@ -119,7 +140,8 @@ export interface DashboardSummary {
   monthly_spending: number;
   monthly_subscriptions_total: number;
   subscription_count: number;
-  linked_item_count: number;
+  linked_source_count: number;
+  source_counts_by_kind: Record<string, number>;
   account_count: number;
   last_synced_at?: string | null;
 }
@@ -130,7 +152,16 @@ export interface StatusResponse {
   products: string[];
   country_codes: string[];
   client_name: string;
-  linked_item_count: number;
+  linked_source_count: number;
+  source_counts_by_kind: Record<string, number>;
   account_count: number;
   last_synced_at?: string | null;
+}
+
+export interface CsvImportResult {
+  detected_columns: Record<string, string>;
+  row_count: number;
+  imported: number;
+  skipped: number;
+  errors: string[];
 }

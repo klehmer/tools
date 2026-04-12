@@ -1,8 +1,30 @@
 """Pydantic models for the finance-tracker API."""
 from __future__ import annotations
 
-from typing import List, Optional, Literal
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
+
+
+SourceKind = Literal["plaid", "simplefin", "manual"]
+
+
+# --- Plaid credential config -------------------------------------------------
+
+class PlaidConfigRequest(BaseModel):
+    client_id: str
+    secret: str
+    env: Literal["sandbox", "production"] = "sandbox"
+    client_name: Optional[str] = None
+
+
+class PlaidConfigResponse(BaseModel):
+    configured: bool
+    env: str
+    client_id_masked: Optional[str] = None
+    has_secret: bool
+    client_name: str
+    products: List[str]
+    country_codes: List[str]
 
 
 # --- Plaid Link flow ---------------------------------------------------------
@@ -19,15 +41,40 @@ class ExchangeTokenRequest(BaseModel):
 
 
 class ExchangeTokenResponse(BaseModel):
-    item_id: str
+    source_id: str
     institution_name: Optional[str] = None
+
+
+# --- SimpleFIN ---------------------------------------------------------------
+
+class SimpleFinClaimRequest(BaseModel):
+    setup_token: str
+    display_name: Optional[str] = None
+
+
+class SimpleFinClaimResponse(BaseModel):
+    source_id: str
+    display_name: str
+
+
+# --- Sources -----------------------------------------------------------------
+
+class Source(BaseModel):
+    source_id: str
+    kind: SourceKind
+    display_name: str
+    linked_at: str
+    last_synced_at: Optional[str] = None
+    account_count: int = 0
+    error: Optional[str] = None
 
 
 # --- Accounts ----------------------------------------------------------------
 
 class Account(BaseModel):
     account_id: str
-    item_id: str
+    source_id: str
+    source_kind: SourceKind = "plaid"
     institution_name: Optional[str] = None
     name: str
     official_name: Optional[str] = None
@@ -37,16 +84,37 @@ class Account(BaseModel):
     current_balance: float = 0.0
     available_balance: Optional[float] = None
     iso_currency_code: Optional[str] = "USD"
+    manual: bool = False  # convenience: same as source_kind == "manual"
 
 
-class LinkedItem(BaseModel):
-    item_id: str
+class ManualAccountInput(BaseModel):
+    name: str
+    type: Literal["depository", "investment", "credit", "loan", "brokerage", "other"] = "depository"
+    subtype: Optional[str] = None
+    current_balance: float = 0.0
+    iso_currency_code: str = "USD"
     institution_name: Optional[str] = None
-    institution_id: Optional[str] = None
-    linked_at: str
-    last_synced_at: Optional[str] = None
-    account_count: int = 0
-    error: Optional[str] = None
+    mask: Optional[str] = None
+
+
+class ManualBalanceUpdate(BaseModel):
+    current_balance: float
+
+
+class ManualTransactionInput(BaseModel):
+    date: str
+    name: str
+    amount: float  # Plaid convention: positive = money out
+    merchant_name: Optional[str] = None
+    category: List[str] = Field(default_factory=list)
+
+
+class CsvImportResult(BaseModel):
+    detected_columns: Dict[str, str]
+    row_count: int
+    imported: int
+    skipped: int
+    errors: List[str] = Field(default_factory=list)
 
 
 # --- Transactions ------------------------------------------------------------
@@ -54,11 +122,11 @@ class LinkedItem(BaseModel):
 class Transaction(BaseModel):
     transaction_id: str
     account_id: str
-    item_id: str
-    date: str  # ISO date
+    source_id: str
+    date: str
     name: str
     merchant_name: Optional[str] = None
-    amount: float  # Plaid convention: positive = money out, negative = money in
+    amount: float
     iso_currency_code: Optional[str] = "USD"
     category: List[str] = Field(default_factory=list)
     pending: bool = False
@@ -68,13 +136,13 @@ class Transaction(BaseModel):
 # --- Net worth ---------------------------------------------------------------
 
 class AssetBucket(BaseModel):
-    label: str  # Cash, Investments, Retirement, Real Estate, Crypto, Other Assets
+    label: str
     amount: float
     account_ids: List[str] = Field(default_factory=list)
 
 
 class LiabilityBucket(BaseModel):
-    label: str  # Credit Cards, Student Loans, Mortgages, Other Debt
+    label: str
     amount: float
     account_ids: List[str] = Field(default_factory=list)
 
@@ -104,12 +172,19 @@ class Subscription(BaseModel):
 
 # --- Income ------------------------------------------------------------------
 
+class IncomeDeposit(BaseModel):
+    date: str
+    amount: float
+    description: str
+
+
 class IncomeSource(BaseModel):
     name: str
     average_monthly: float
     last_payment_date: Optional[str] = None
     last_payment_amount: Optional[float] = None
     transaction_count: int = 0
+    deposits: List[IncomeDeposit] = []
 
 
 class IncomeSummary(BaseModel):
@@ -124,7 +199,7 @@ class Goal(BaseModel):
     id: Optional[str] = None
     name: str
     target_amount: float
-    target_date: str  # ISO date
+    target_date: str
     current_amount: float = 0.0
     monthly_contribution: Optional[float] = None
     notes: Optional[str] = None
@@ -144,7 +219,7 @@ class GoalProjection(BaseModel):
 
 class PlanRequest(BaseModel):
     goals: List[Goal]
-    assumed_return_annual: float = 0.06  # 6% default
+    assumed_return_annual: float = 0.06
 
 
 class PlanResponse(BaseModel):
@@ -163,6 +238,7 @@ class DashboardSummary(BaseModel):
     monthly_spending: float
     monthly_subscriptions_total: float
     subscription_count: int
-    linked_item_count: int
+    linked_source_count: int
+    source_counts_by_kind: Dict[str, int]
     account_count: int
     last_synced_at: Optional[str] = None

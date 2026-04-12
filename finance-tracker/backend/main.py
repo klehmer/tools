@@ -1,24 +1,16 @@
 """FastAPI entry point for finance-tracker.
 
-Endpoints
----------
-GET  /status                      — configuration + link count
-POST /link/token                  — create a Plaid Link token for the frontend
-POST /link/exchange               — exchange a public_token and kick off initial sync
-GET  /items                       — linked institutions
-DELETE /items/{item_id}           — unlink an institution (local + plaid side)
-POST /sync                        — refresh accounts/transactions/investments/liabilities
-POST /sync/{item_id}              — refresh a single item
-GET  /accounts                    — all cached accounts
-GET  /transactions                — cached transactions (paginated)
-GET  /networth                    — asset/liability breakdown
-GET  /subscriptions               — detected recurring charges
-GET  /income                      — income summary
-GET  /dashboard                   — headline numbers for the overview screen
-GET  /goals                       — list goals
-POST /goals                       — create/update a goal
-DELETE /goals/{goal_id}           — delete a goal
-POST /plan                        — run goal projections against cash flow
+Sources
+-------
+A **source** is the unit of linked financial data. Three kinds are supported:
+
+- ``plaid``    — account linked through Plaid Link
+- ``simplefin``— SimpleFIN bridge connection (single access URL)
+- ``manual``   — hand-entered accounts + CSV-imported transactions
+
+The same user can combine all three: linked Plaid checking, SimpleFIN
+brokerage, and a manual cash envelope, all rolled up into the same net
+worth / subscriptions / goals panels.
 """
 from __future__ import annotations
 
@@ -26,34 +18,44 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
+import manual
+import simplefin_client
 import storage
 from income import monthly_spending, summarize_income
 from models import (
     Account,
+    CsvImportResult,
     DashboardSummary,
     ExchangeTokenRequest,
     ExchangeTokenResponse,
     Goal,
-    LinkedItem,
     LinkTokenResponse,
+    ManualAccountInput,
+    ManualBalanceUpdate,
+    ManualTransactionInput,
     NetWorthSnapshot,
+    PlaidConfigRequest,
+    PlaidConfigResponse,
     PlanRequest,
     PlanResponse,
+    SimpleFinClaimRequest,
+    SimpleFinClaimResponse,
+    Source,
     Subscription,
     Transaction,
 )
 from networth import compute_net_worth
-from plaid_client import get_client
+from plaid_client import get_client, reset_client
 from planning import build_plan
 from subscriptions import detect_subscriptions
 
 log = logging.getLogger("finance-tracker")
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="finance-tracker", version="0.1.0")
+app = FastAPI(title="finance-tracker", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5175", "http://localhost:5173", "http://localhost:5174"],
@@ -64,80 +66,181 @@ app.add_middleware(
 
 # --- helpers ----------------------------------------------------------------
 
-def _item_by_id(item_id: str) -> dict:
-    item = storage.get_item(item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail=f"Item {item_id} not found")
-    return item
+def _source_by_id(source_id: str) -> dict:
+    source = storage.get_source(source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail=f"Source {source_id} not found")
+    return source
 
 
-def _sync_one(item: dict) -> dict:
+def _config_response() -> PlaidConfigResponse:
     client = get_client()
-    access_token = item["access_token"]
-    item_id = item["item_id"]
+    masked: Optional[str] = None
+    if client.client_id:
+        cid = client.client_id
+        masked = f"{cid[:4]}…{cid[-4:]}" if len(cid) > 8 else "••••"
+    return PlaidConfigResponse(
+        configured=client.configured,
+        env=client.env_name,
+        client_id_masked=masked,
+        has_secret=bool(client.secret),
+        client_name=client.client_name,
+        products=[p.value for p in client.products],
+        country_codes=[c.value for c in client.country_codes],
+    )
+
+
+def _sync_plaid(source: dict) -> dict:
+    client = get_client()
+    if not client.configured:
+        raise HTTPException(status_code=400, detail="Plaid is not configured")
+    cfg = source.get("config") or {}
+    access_token = cfg.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Plaid source has no access_token")
+    source_id = source["source_id"]
     errors: List[str] = []
 
-    # Accounts
     try:
         accounts = client.get_accounts(access_token)
         for a in accounts:
-            a["item_id"] = item_id
-            a["institution_name"] = item.get("institution_name")
-        storage.replace_accounts_for_item(item_id, accounts)
-    except Exception as e:  # pragma: no cover - network path
-        log.exception("accounts sync failed for %s", item_id)
+            a["source_id"] = source_id
+            a["source_kind"] = "plaid"
+            a["institution_name"] = source.get("display_name")
+            a["manual"] = False
+        storage.replace_accounts_for_source(source_id, accounts)
+    except Exception as e:
+        log.exception("accounts sync failed for %s", source_id)
         errors.append(f"accounts: {e}")
 
-    # Transactions (incremental via /transactions/sync)
     try:
-        result = client.sync_transactions(access_token, item.get("transactions_cursor"))
+        result = client.sync_transactions(access_token, cfg.get("transactions_cursor"))
         storage.upsert_transactions(
-            item_id,
+            source_id,
             added=result["added"],
             modified=result["modified"],
             removed_ids=result["removed"],
         )
-        storage.update_item(item_id, transactions_cursor=result["cursor"])
-    except Exception as e:  # pragma: no cover
-        log.exception("transactions sync failed for %s", item_id)
+        storage.update_source(source_id, config={"transactions_cursor": result["cursor"]})
+    except Exception as e:
+        log.exception("transactions sync failed for %s", source_id)
         errors.append(f"transactions: {e}")
 
-    # Investments (optional — not every institution has this)
     try:
         inv = client.get_investments(access_token)
-        storage.save_investments(item_id, inv)
-    except Exception as e:  # pragma: no cover
-        log.warning("investments sync failed for %s: %s", item_id, e)
+        storage.save_investments(source_id, inv)
+    except Exception as e:
+        log.warning("investments sync failed for %s: %s", source_id, e)
 
-    # Liabilities
     try:
         liab = client.get_liabilities(access_token)
-        storage.save_liabilities(item_id, liab)
-    except Exception as e:  # pragma: no cover
-        log.warning("liabilities sync failed for %s: %s", item_id, e)
+        storage.save_liabilities(source_id, liab)
+    except Exception as e:
+        log.warning("liabilities sync failed for %s: %s", source_id, e)
 
     now = datetime.utcnow().isoformat()
-    storage.update_item(
-        item_id,
+    storage.update_source(
+        source_id,
         last_synced_at=now,
         error="; ".join(errors) if errors else None,
     )
-    return {"item_id": item_id, "last_synced_at": now, "errors": errors}
+    return {"source_id": source_id, "kind": "plaid", "last_synced_at": now, "errors": errors}
 
 
-# --- config / status --------------------------------------------------------
+def _sync_simplefin(source: dict) -> dict:
+    cfg = source.get("config") or {}
+    access_url = cfg.get("access_url")
+    if not access_url:
+        raise HTTPException(status_code=400, detail="SimpleFIN source has no access_url")
+    source_id = source["source_id"]
+    errors: List[str] = []
+    try:
+        payload = simplefin_client.fetch_accounts(access_url)
+        normalized = simplefin_client.normalize_payload(
+            source_id=source_id,
+            display_name=source.get("display_name") or "SimpleFIN",
+            payload=payload,
+        )
+        storage.replace_accounts_for_source(source_id, normalized["accounts"])
+        storage.upsert_transactions(source_id, added=normalized["transactions"])
+        errors.extend(normalized.get("errors") or [])
+    except Exception as e:
+        log.exception("simplefin sync failed for %s", source_id)
+        errors.append(str(e))
+
+    now = datetime.utcnow().isoformat()
+    storage.update_source(
+        source_id,
+        last_synced_at=now,
+        error="; ".join(errors) if errors else None,
+    )
+    return {"source_id": source_id, "kind": "simplefin", "last_synced_at": now, "errors": errors}
+
+
+def _sync_one(source: dict) -> dict:
+    kind = source.get("kind")
+    if kind == "plaid":
+        return _sync_plaid(source)
+    if kind == "simplefin":
+        return _sync_simplefin(source)
+    if kind == "manual":
+        now = datetime.utcnow().isoformat()
+        storage.update_source(source["source_id"], last_synced_at=now, error=None)
+        return {"source_id": source["source_id"], "kind": "manual", "last_synced_at": now, "errors": []}
+    raise HTTPException(status_code=400, detail=f"unknown source kind: {kind}")
+
+
+# --- status -----------------------------------------------------------------
 
 @app.get("/status")
 def status():
     client = get_client()
-    items = storage.list_items()
+    sources = storage.list_sources()
     accounts = storage.list_accounts()
+    kind_counts: dict = {}
+    for s in sources:
+        kind_counts[s.get("kind", "unknown")] = kind_counts.get(s.get("kind", "unknown"), 0) + 1
     return {
         **client.status(),
-        "linked_item_count": len(items),
+        "linked_source_count": len(sources),
+        "source_counts_by_kind": kind_counts,
         "account_count": len(accounts),
-        "last_synced_at": max((i.get("last_synced_at") or "" for i in items), default=None) or None,
+        "last_synced_at": max((s.get("last_synced_at") or "" for s in sources), default=None) or None,
     }
+
+
+# --- Plaid credential config -----------------------------------------------
+
+@app.get("/config", response_model=PlaidConfigResponse)
+def get_config():
+    return _config_response()
+
+
+@app.post("/config", response_model=PlaidConfigResponse)
+def save_config(req: PlaidConfigRequest):
+    if not req.client_id.strip() or not req.secret.strip():
+        raise HTTPException(status_code=400, detail="client_id and secret are required")
+    storage.save_plaid_config(
+        client_id=req.client_id,
+        secret=req.secret,
+        env=req.env,
+        client_name=req.client_name or None,
+    )
+    reset_client()
+    try:
+        get_client().create_link_token()
+    except Exception as e:
+        storage.clear_plaid_config()
+        reset_client()
+        raise HTTPException(status_code=400, detail=f"Plaid rejected those credentials: {e}")
+    return _config_response()
+
+
+@app.delete("/config")
+def clear_config():
+    storage.clear_plaid_config()
+    reset_client()
+    return {"ok": True}
 
 
 # --- Plaid link flow --------------------------------------------------------
@@ -148,7 +251,7 @@ def create_link_token():
     if not client.configured:
         raise HTTPException(
             status_code=400,
-            detail="Plaid client not configured. Set PLAID_CLIENT_ID and PLAID_SECRET in backend/.env.",
+            detail="Plaid client not configured. Set Plaid credentials in Settings first.",
         )
     try:
         return LinkTokenResponse(**client.create_link_token())
@@ -170,71 +273,165 @@ def exchange_link_token(req: ExchangeTokenRequest):
         if inst:
             institution_name = inst["name"]
 
-    record = storage.save_item(
-        item_id=tokens["item_id"],
-        access_token=tokens["access_token"],
-        institution_name=institution_name,
-        institution_id=req.institution_id,
+    record = storage.save_source(
+        source_id=tokens["item_id"],
+        kind="plaid",
+        display_name=institution_name or "Plaid",
+        config={
+            "access_token": tokens["access_token"],
+            "institution_id": req.institution_id,
+        },
     )
-    # Initial sync so the dashboard has data immediately.
     try:
-        _sync_one(record)
+        _sync_plaid(record)
     except Exception as e:
-        log.exception("initial sync failed")
-        storage.update_item(record["item_id"], error=str(e))
+        log.exception("initial plaid sync failed")
+        storage.update_source(record["source_id"], error=str(e))
 
-    return ExchangeTokenResponse(item_id=tokens["item_id"], institution_name=institution_name)
+    return ExchangeTokenResponse(source_id=tokens["item_id"], institution_name=institution_name)
 
 
-# --- items ------------------------------------------------------------------
+# --- SimpleFIN --------------------------------------------------------------
 
-@app.get("/items", response_model=List[LinkedItem])
-def list_items():
-    items = storage.list_items()
-    accounts = storage.list_accounts()
-    counts: dict = {}
-    for a in accounts:
-        counts[a.get("item_id")] = counts.get(a.get("item_id"), 0) + 1
-    out: List[LinkedItem] = []
-    for i in items:
-        out.append(
-            LinkedItem(
-                item_id=i["item_id"],
-                institution_name=i.get("institution_name"),
-                institution_id=i.get("institution_id"),
-                linked_at=i.get("linked_at") or "",
-                last_synced_at=i.get("last_synced_at"),
-                account_count=counts.get(i["item_id"], 0),
-                error=i.get("error"),
-            )
+@app.post("/sources/simplefin/claim", response_model=SimpleFinClaimResponse)
+def simplefin_claim(req: SimpleFinClaimRequest):
+    try:
+        access_url = simplefin_client.claim_setup_token(req.setup_token)
+    except simplefin_client.SimpleFinError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    existing = storage.get_source_by_config("access_url", access_url)
+    source_id = existing["source_id"] if existing else f"sf_{int(datetime.utcnow().timestamp() * 1000)}"
+    display_name = req.display_name or simplefin_client._bridge_host(access_url)
+    record = storage.save_source(
+        source_id=source_id,
+        kind="simplefin",
+        display_name=display_name,
+        config={"access_url": access_url},
+    )
+    try:
+        _sync_simplefin(record)
+    except Exception as e:
+        log.exception("initial simplefin sync failed")
+        storage.update_source(record["source_id"], error=str(e))
+
+    return SimpleFinClaimResponse(source_id=source_id, display_name=display_name)
+
+
+# --- Manual accounts --------------------------------------------------------
+
+@app.post("/accounts/manual", response_model=Account)
+def create_manual_account(inp: ManualAccountInput):
+    acc = manual.create_manual_account(inp.model_dump())
+    return Account(**acc)
+
+
+@app.patch("/accounts/{account_id}/balance", response_model=Account)
+def update_manual_balance(account_id: str, body: ManualBalanceUpdate):
+    try:
+        acc = manual.set_manual_balance(account_id, body.current_balance)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return Account(**acc)
+
+
+@app.post("/accounts/{account_id}/transactions", response_model=Transaction)
+def add_manual_transaction(account_id: str, body: ManualTransactionInput):
+    try:
+        tx = manual.add_manual_transaction(account_id, body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return Transaction(**tx)
+
+
+@app.delete("/accounts/{account_id}")
+def delete_manual_account(account_id: str):
+    acc = storage.get_account(account_id)
+    if not acc:
+        raise HTTPException(status_code=404, detail="account not found")
+    if acc.get("source_kind") != "manual":
+        raise HTTPException(
+            status_code=400,
+            detail="only manual accounts can be deleted directly — unlink the source to remove a Plaid/SimpleFIN account",
         )
-    return out
-
-
-@app.delete("/items/{item_id}")
-def delete_item(item_id: str):
-    item = _item_by_id(item_id)
-    client = get_client()
-    client.remove_item(item["access_token"])
-    storage.delete_item(item_id)
+    storage.delete_account(account_id)
     return {"ok": True}
 
 
-# --- sync -------------------------------------------------------------------
+@app.post("/accounts/{account_id}/csv", response_model=CsvImportResult)
+async def import_account_csv(
+    account_id: str,
+    file: UploadFile = File(...),
+    sign_convention: str = Form("auto"),
+):
+    content = await file.read()
+    try:
+        result = manual.import_csv(account_id, content, sign_convention=sign_convention)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return CsvImportResult(
+        detected_columns=result["detected_columns"],
+        row_count=result["row_count"],
+        imported=result["imported"],
+        skipped=result["skipped"],
+        errors=result["errors"],
+    )
+
+
+# --- Sources (list / delete / sync) ----------------------------------------
+
+@app.get("/sources", response_model=List[Source])
+def list_sources():
+    sources = storage.list_sources()
+    accounts = storage.list_accounts()
+    counts: dict = {}
+    for a in accounts:
+        counts[a.get("source_id")] = counts.get(a.get("source_id"), 0) + 1
+    return [
+        Source(
+            source_id=s["source_id"],
+            kind=s.get("kind", "plaid"),
+            display_name=s.get("display_name") or "",
+            linked_at=s.get("linked_at") or "",
+            last_synced_at=s.get("last_synced_at"),
+            account_count=counts.get(s["source_id"], 0),
+            error=s.get("error"),
+        )
+        for s in sources
+    ]
+
+
+@app.delete("/sources/{source_id}")
+def delete_source(source_id: str):
+    source = _source_by_id(source_id)
+    if source.get("kind") == "plaid":
+        client = get_client()
+        token = (source.get("config") or {}).get("access_token")
+        if token:
+            client.remove_item(token)
+    storage.delete_source(source_id)
+    return {"ok": True}
+
 
 @app.post("/sync")
 def sync_all():
-    items = storage.list_items()
-    results = [_sync_one(i) for i in items]
+    results = []
+    for s in storage.list_sources():
+        try:
+            results.append(_sync_one(s))
+        except HTTPException as e:
+            results.append({"source_id": s["source_id"], "error": e.detail})
+        except Exception as e:
+            results.append({"source_id": s["source_id"], "error": str(e)})
     return {"synced": len(results), "results": results}
 
 
-@app.post("/sync/{item_id}")
-def sync_one(item_id: str):
-    return _sync_one(_item_by_id(item_id))
+@app.post("/sync/{source_id}")
+def sync_one(source_id: str):
+    return _sync_one(_source_by_id(source_id))
 
 
-# --- data -------------------------------------------------------------------
+# --- Data -------------------------------------------------------------------
 
 @app.get("/accounts", response_model=List[Account])
 def list_accounts():
@@ -251,8 +448,7 @@ def list_transactions(
     if account_id:
         txns = [t for t in txns if t.get("account_id") == account_id]
     txns.sort(key=lambda t: t.get("date", ""), reverse=True)
-    sliced = txns[offset : offset + limit]
-    return [Transaction(**t) for t in sliced]
+    return [Transaction(**t) for t in txns[offset : offset + limit]]
 
 
 @app.get("/networth", response_model=NetWorthSnapshot)
@@ -262,38 +458,42 @@ def networth():
 
 @app.get("/subscriptions", response_model=List[Subscription])
 def subscriptions():
-    return detect_subscriptions(storage.list_transactions())
+    return detect_subscriptions(storage.list_transactions(), accounts=storage.list_accounts())
 
 
 @app.get("/income")
 def income(window_days: int = Query(90, ge=30, le=365)):
-    return summarize_income(storage.list_transactions(), window_days=window_days)
+    return summarize_income(storage.list_transactions(), window_days=window_days, accounts=storage.list_accounts())
 
 
 @app.get("/dashboard", response_model=DashboardSummary)
 def dashboard():
     accounts = storage.list_accounts()
     txns = storage.list_transactions()
-    items = storage.list_items()
+    sources = storage.list_sources()
     nw = compute_net_worth(accounts)
-    inc = summarize_income(txns, window_days=90)
-    subs = detect_subscriptions(txns)
+    inc = summarize_income(txns, window_days=90, accounts=accounts)
+    subs = detect_subscriptions(txns, accounts=accounts)
     subs_total = round(sum(s.annualized_cost / 12.0 for s in subs if s.status == "active"), 2)
-    spending = monthly_spending(txns)
-    last = max((i.get("last_synced_at") or "" for i in items), default=None) or None
+    spending = monthly_spending(txns, accounts=accounts)
+    last = max((s.get("last_synced_at") or "" for s in sources), default=None) or None
+    kind_counts: dict = {}
+    for s in sources:
+        kind_counts[s.get("kind", "unknown")] = kind_counts.get(s.get("kind", "unknown"), 0) + 1
     return DashboardSummary(
         net_worth=nw,
         monthly_income=inc.total_monthly,
         monthly_spending=spending,
         monthly_subscriptions_total=subs_total,
         subscription_count=len([s for s in subs if s.status == "active"]),
-        linked_item_count=len(items),
+        linked_source_count=len(sources),
+        source_counts_by_kind=kind_counts,
         account_count=len(accounts),
         last_synced_at=last,
     )
 
 
-# --- goals ------------------------------------------------------------------
+# --- Goals ------------------------------------------------------------------
 
 @app.get("/goals", response_model=List[Goal])
 def list_goals():
@@ -312,15 +512,14 @@ def delete_goal(goal_id: str):
     return {"ok": True}
 
 
-# --- planning ---------------------------------------------------------------
-
 @app.post("/plan", response_model=PlanResponse)
 def plan(req: PlanRequest):
     txns = storage.list_transactions()
-    inc = summarize_income(txns, window_days=90)
-    subs = detect_subscriptions(txns)
+    accs = storage.list_accounts()
+    inc = summarize_income(txns, window_days=90, accounts=accs)
+    subs = detect_subscriptions(txns, accounts=accs)
     subs_total = sum(s.annualized_cost / 12.0 for s in subs if s.status == "active")
-    spending = monthly_spending(txns)
+    spending = monthly_spending(txns, accounts=accs)
     return build_plan(
         goals=req.goals,
         annual_rate=req.assumed_return_annual,

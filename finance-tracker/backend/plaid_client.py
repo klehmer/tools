@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import storage
 from plaid import Configuration, ApiClient, Environment
 from plaid.api import plaid_api
 from plaid.exceptions import ApiException
@@ -29,11 +30,20 @@ from plaid.model.item_remove_request import ItemRemoveRequest
 from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdRequest
 
 
-ENV_MAP = {
-    "sandbox": Environment.Sandbox,
-    "development": Environment.Development,
-    "production": Environment.Production,
+_ENV_ATTRS = {
+    "sandbox": "Sandbox",
+    "production": "Production",
+    # "development" was retired by Plaid; keep the name for back-compat
+    # by aliasing it to Sandbox.
+    "development": "Sandbox",
 }
+
+
+def _resolve_env(name: str):
+    attr = _ENV_ATTRS.get(name.lower(), "Sandbox")
+    # Newer plaid-python uses capitalized attrs (Sandbox/Production).
+    # Very old versions used lowercase strings — handle both.
+    return getattr(Environment, attr, None) or getattr(Environment, attr.lower(), "https://sandbox.plaid.com")
 
 
 def _split(val: str) -> List[str]:
@@ -41,16 +51,28 @@ def _split(val: str) -> List[str]:
 
 
 class PlaidClient:
-    def __init__(self) -> None:
-        self.client_id = os.getenv("PLAID_CLIENT_ID", "")
-        self.secret = os.getenv("PLAID_SECRET", "")
-        env_name = os.getenv("PLAID_ENV", "sandbox").lower()
-        self.env_name = env_name
-        host = ENV_MAP.get(env_name, Environment.Sandbox)
+    """Configuration precedence: JSON config file (set via the UI) > env vars.
 
-        self.products = [Products(p) for p in _split(os.getenv("PLAID_PRODUCTS", "transactions,investments,liabilities"))]
-        self.country_codes = [CountryCode(c) for c in _split(os.getenv("PLAID_COUNTRY_CODES", "US"))]
-        self.client_name = os.getenv("PLAID_CLIENT_NAME", "Finance Tracker")
+    The UI is the canonical place to set credentials; env vars are supported
+    only as a fallback so people who prefer ``.env`` still work.
+    """
+
+    def __init__(self) -> None:
+        stored = storage.get_plaid_config()
+
+        self.client_id = stored.get("client_id") or os.getenv("PLAID_CLIENT_ID", "")
+        self.secret = stored.get("secret") or os.getenv("PLAID_SECRET", "")
+        env_name = (stored.get("env") or os.getenv("PLAID_ENV", "sandbox")).lower()
+        self.env_name = env_name
+        host = _resolve_env(env_name)
+
+        products_raw = stored.get("products") or _split(
+            os.getenv("PLAID_PRODUCTS", "transactions,investments,liabilities")
+        )
+        country_raw = stored.get("country_codes") or _split(os.getenv("PLAID_COUNTRY_CODES", "US"))
+        self.products = [Products(p) for p in products_raw]
+        self.country_codes = [CountryCode(c) for c in country_raw]
+        self.client_name = stored.get("client_name") or os.getenv("PLAID_CLIENT_NAME", "Finance Tracker")
 
         cfg = Configuration(
             host=host,

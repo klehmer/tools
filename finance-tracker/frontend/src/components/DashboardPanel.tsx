@@ -82,8 +82,9 @@ export function DashboardPanel() {
       </div>
 
       <div className="text-xs text-slate-500">
-        {data.linked_item_count} institution{data.linked_item_count === 1 ? "" : "s"} ·{" "}
-        {data.account_count} account{data.account_count === 1 ? "" : "s"} ·{" "}
+        {data.linked_source_count} source{data.linked_source_count === 1 ? "" : "s"} ·{" "}
+        {data.account_count} account{data.account_count === 1 ? "" : "s"}
+        {sourceMixLabel(data.source_counts_by_kind)} ·{" "}
         {data.last_synced_at
           ? `last synced ${new Date(data.last_synced_at).toLocaleString()}`
           : "never synced"}
@@ -121,6 +122,13 @@ function StatCard({
       <div className="mt-1 text-xs text-slate-500">{sub}</div>
     </div>
   );
+}
+
+function sourceMixLabel(counts: Record<string, number>): string {
+  const entries = Object.entries(counts).filter(([, n]) => n > 0);
+  if (entries.length === 0) return "";
+  const parts = entries.map(([kind, n]) => `${n} ${kind}`);
+  return ` (${parts.join(", ")})`;
 }
 
 function BucketList({
