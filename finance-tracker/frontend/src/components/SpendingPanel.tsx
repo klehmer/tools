@@ -8,11 +8,12 @@ const CATEGORIES: { value: SpendingCategory; label: string }[] = [
   { value: "bill", label: "Bill" },
   { value: "work_expense", label: "Work expense" },
   { value: "food", label: "Food" },
+  { value: "vacation", label: "Vacation & recreation" },
   { value: "other", label: "Other" },
 ];
 
 const BUCKET_META: {
-  key: keyof Pick<SpendingBreakdown, "subscriptions" | "bills" | "work_expenses" | "food" | "other">;
+  key: keyof Pick<SpendingBreakdown, "subscriptions" | "bills" | "work_expenses" | "food" | "vacation" | "other">;
   title: string;
   color: string;
   headerBg: string;
@@ -22,6 +23,7 @@ const BUCKET_META: {
   { key: "bills", title: "Recurring bills", color: "border-amber-100", headerBg: "hover:bg-amber-50" },
   { key: "work_expenses", title: "Work expenses", color: "border-emerald-100", headerBg: "hover:bg-emerald-50" },
   { key: "food", title: "Food", color: "border-orange-100", headerBg: "hover:bg-orange-50" },
+  { key: "vacation", title: "Vacation & recreation", color: "border-cyan-100", headerBg: "hover:bg-cyan-50" },
   { key: "other", title: "Other spending", color: "border-slate-200", headerBg: "hover:bg-slate-50", defaultCollapsed: true },
 ];
 
@@ -74,7 +76,7 @@ export function SpendingPanel() {
         </div>
       </div>
 
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-6 gap-3">
         {BUCKET_META.map((b) => {
           const bucket = data[b.key];
           return (

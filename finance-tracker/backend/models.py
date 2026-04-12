@@ -158,7 +158,7 @@ class NetWorthSnapshot(BaseModel):
 
 # --- Subscriptions -----------------------------------------------------------
 
-SpendingCategory = Literal["subscription", "bill", "work_expense", "food", "other"]
+SpendingCategory = Literal["subscription", "bill", "work_expense", "food", "vacation", "other"]
 
 
 class CategoryRuleRequest(BaseModel):

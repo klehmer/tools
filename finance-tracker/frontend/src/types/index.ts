@@ -159,7 +159,7 @@ export interface StatusResponse {
   last_synced_at?: string | null;
 }
 
-export type SpendingCategory = "subscription" | "bill" | "work_expense" | "food" | "other";
+export type SpendingCategory = "subscription" | "bill" | "work_expense" | "food" | "vacation" | "other";
 
 export interface SpendingTransaction {
   date: string;
@@ -181,6 +181,7 @@ export interface SpendingBreakdown {
   bills: SpendingBucket;
   work_expenses: SpendingBucket;
   food: SpendingBucket;
+  vacation: SpendingBucket;
   other: SpendingBucket;
 }
 

@@ -226,7 +226,7 @@ def monthly_spending(
     return round(sum(float(t["amount"]) for t in spending), 2)
 
 
-_BUCKET_NAMES = ("subscriptions", "bills", "work_expenses", "food", "other")
+_BUCKET_NAMES = ("subscriptions", "bills", "work_expenses", "food", "vacation", "other")
 
 # Map category rule values → bucket keys
 _CATEGORY_TO_BUCKET = {
@@ -237,6 +237,7 @@ _CATEGORY_TO_BUCKET = {
     "work_expense": "work_expenses",
     "work_expenses": "work_expenses",
     "food": "food",
+    "vacation": "vacation",
     "other": "other",
 }
 
