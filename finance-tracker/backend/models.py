@@ -159,11 +159,17 @@ class NetWorthSnapshot(BaseModel):
 # --- Subscriptions -----------------------------------------------------------
 
 SpendingCategory = Literal["subscription", "bill", "work_expense", "food", "vacation", "other"]
+SpendingFrequency = Literal["weekly", "biweekly", "monthly", "quarterly", "annual"]
 
 
 class CategoryRuleRequest(BaseModel):
     merchant_name: str
     category: SpendingCategory
+
+
+class FrequencyRuleRequest(BaseModel):
+    merchant_name: str
+    frequency: SpendingFrequency
 
 
 class Subscription(BaseModel):

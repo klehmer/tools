@@ -242,19 +242,47 @@ _CATEGORY_TO_BUCKET = {
 }
 
 
+_CHECK_NUMBER_RE = re.compile(r"check\s*#?\s*(\d+)", re.IGNORECASE)
+
+# Frequency → monthly multiplier
+_FREQ_TO_MONTHLY: Dict[str, float] = {
+    "weekly": 52.0 / 12.0,
+    "biweekly": 26.0 / 12.0,
+    "monthly": 1.0,
+    "quarterly": 1.0 / 3.0,
+    "annual": 1.0 / 12.0,
+}
+
+
 def spending_breakdown(
     transactions: List[Dict],
     merchant_categories: Dict[str, str],
     window_days: int = 30,
     accounts: Optional[List[Dict]] = None,
+    frequency_rules: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Categorize spending into subscriptions, bills, work expenses, food, other.
 
     ``merchant_categories`` maps normalized merchant names to a category
     string. Both auto-detected (from subscriptions.py) and user-defined
     rules should be merged before passing — user rules take priority.
+
+    ``frequency_rules`` maps normalized merchant names to a frequency string
+    (weekly, biweekly, monthly, quarterly, annual). Used to calculate
+    projected costs for subscription and bill buckets.
     """
+    frequency_rules = frequency_rules or {}
     spending = _get_spending_transactions(transactions, window_days, accounts)
+
+    # Build account lookup
+    account_map: Dict[str, str] = {}
+    if accounts:
+        for a in accounts:
+            label = a.get("name") or ""
+            inst = a.get("institution_name")
+            if inst:
+                label = f"{inst} — {label}"
+            account_map[a["account_id"]] = label
 
     buckets: Dict[str, List[Dict[str, Any]]] = {k: [] for k in _BUCKET_NAMES}
     totals: Dict[str, float] = {k: 0.0 for k in _BUCKET_NAMES}
@@ -264,13 +292,28 @@ def spending_breakdown(
         raw_kind = merchant_categories.get(merchant_key, "other")
         bucket = _CATEGORY_TO_BUCKET.get(raw_kind, "other")
 
-        entry = {
+        name = (t.get("name") or "").strip()
+        entry: Dict[str, Any] = {
             "date": t["date"],
-            "name": (t.get("name") or "").strip(),
+            "name": name,
             "amount": round(float(t["amount"]), 2),
             "merchant_key": merchant_key,
             "category": bucket,
+            "account_name": account_map.get(t.get("account_id", ""), ""),
         }
+
+        # Extract check number if present
+        check_match = _CHECK_NUMBER_RE.search(name) or _CHECK_NUMBER_RE.search(
+            t.get("merchant_name") or ""
+        )
+        if check_match:
+            entry["check_number"] = check_match.group(1)
+
+        # Include frequency if set
+        freq = frequency_rules.get(merchant_key)
+        if freq:
+            entry["frequency"] = freq
+
         buckets[bucket].append(entry)
         totals[bucket] += float(t["amount"])
 
@@ -282,8 +325,39 @@ def spending_breakdown(
         "total": round(sum(totals.values()), 2),
     }
     for k in _BUCKET_NAMES:
-        result[k] = {"total": round(totals[k], 2), "transactions": buckets[k]}
+        bucket_data: Dict[str, Any] = {
+            "total": round(totals[k], 2),
+            "transactions": buckets[k],
+        }
+        # For subscriptions and bills, compute projected costs from frequencies
+        if k in ("subscriptions", "bills"):
+            bucket_data.update(_compute_projected_costs(buckets[k], frequency_rules))
+        result[k] = bucket_data
     return result
+
+
+def _compute_projected_costs(
+    transactions: List[Dict[str, Any]],
+    frequency_rules: Dict[str, str],
+) -> Dict[str, Any]:
+    """Aggregate per-merchant costs and project monthly/annual equivalents."""
+    # Group by merchant_key, compute average amount per merchant
+    merchant_amounts: Dict[str, List[float]] = defaultdict(list)
+    for t in transactions:
+        merchant_amounts[t["merchant_key"]].append(t["amount"])
+
+    monthly_total = 0.0
+    for merchant_key, amounts in merchant_amounts.items():
+        avg = sum(amounts) / len(amounts)
+        freq = frequency_rules.get(merchant_key)
+        multiplier = _FREQ_TO_MONTHLY.get(freq or "", 0.0)
+        if multiplier:
+            monthly_total += avg * multiplier
+
+    return {
+        "monthly_equivalent": round(monthly_total, 2),
+        "annual_equivalent": round(monthly_total * 12, 2),
+    }
 
 
 def _normalize_for_match(name: str) -> str:

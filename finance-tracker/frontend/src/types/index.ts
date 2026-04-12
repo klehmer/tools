@@ -160,6 +160,7 @@ export interface StatusResponse {
 }
 
 export type SpendingCategory = "subscription" | "bill" | "work_expense" | "food" | "vacation" | "other";
+export type SpendingFrequency = "weekly" | "biweekly" | "monthly" | "quarterly" | "annual";
 
 export interface SpendingTransaction {
   date: string;
@@ -167,11 +168,16 @@ export interface SpendingTransaction {
   amount: number;
   merchant_key: string;
   category: string;
+  account_name: string;
+  check_number?: string;
+  frequency?: SpendingFrequency;
 }
 
 export interface SpendingBucket {
   total: number;
   transactions: SpendingTransaction[];
+  monthly_equivalent?: number;
+  annual_equivalent?: number;
 }
 
 export interface SpendingBreakdown {

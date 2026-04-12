@@ -32,6 +32,7 @@ LIABILITIES_FILE = DATA_DIR / "liabilities.json"
 GOALS_FILE = DATA_DIR / "goals.json"
 META_FILE = DATA_DIR / "meta.json"
 CATEGORY_RULES_FILE = DATA_DIR / "category_rules.json"
+FREQUENCY_RULES_FILE = DATA_DIR / "frequency_rules.json"
 
 # One-time migration from the old Plaid-only layout.
 LEGACY_ITEMS_FILE = DATA_DIR / "items.json"
@@ -425,3 +426,25 @@ def delete_category_rule(merchant: str) -> None:
         rules = get_category_rules()
         rules.pop(merchant, None)
         _write(CATEGORY_RULES_FILE, rules)
+
+
+# --- Frequency rules ---------------------------------------------------------
+
+def get_frequency_rules() -> Dict[str, str]:
+    with _lock:
+        return _read(FREQUENCY_RULES_FILE, {})
+
+
+def save_frequency_rule(merchant: str, frequency: str) -> Dict[str, str]:
+    with _lock:
+        rules = get_frequency_rules()
+        rules[merchant] = frequency
+        _write(FREQUENCY_RULES_FILE, rules)
+        return rules
+
+
+def delete_frequency_rule(merchant: str) -> None:
+    with _lock:
+        rules = get_frequency_rules()
+        rules.pop(merchant, None)
+        _write(FREQUENCY_RULES_FILE, rules)

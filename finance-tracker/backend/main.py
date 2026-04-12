@@ -28,6 +28,7 @@ from income import monthly_spending, spending_breakdown, summarize_income
 from models import (
     Account,
     CategoryRuleRequest,
+    FrequencyRuleRequest,
     CsvImportResult,
     DashboardSummary,
     ExchangeTokenRequest,
@@ -480,7 +481,8 @@ def spending(window_days: int = Query(30, ge=7, le=365)):
         categories[key] = "subscription" if s.kind == "subscription" else "bill"
     # User rules take priority over auto-detection
     categories.update(storage.get_category_rules())
-    return spending_breakdown(txns, categories, window_days=window_days, accounts=accs)
+    freq_rules = storage.get_frequency_rules()
+    return spending_breakdown(txns, categories, window_days=window_days, accounts=accs, frequency_rules=freq_rules)
 
 
 @app.put("/spending/categorize")
@@ -501,6 +503,27 @@ def get_category_rules():
 @app.delete("/spending/rules/{merchant}")
 def delete_category_rule(merchant: str):
     storage.delete_category_rule(merchant)
+    return {"ok": True}
+
+
+@app.put("/spending/frequency")
+def set_merchant_frequency(req: FrequencyRuleRequest):
+    from income import _normalize_for_match
+    key = _normalize_for_match(req.merchant_name)
+    if not key:
+        raise HTTPException(status_code=400, detail="merchant name is empty")
+    storage.save_frequency_rule(key, req.frequency)
+    return {"ok": True, "merchant": key, "frequency": req.frequency}
+
+
+@app.get("/spending/frequencies")
+def get_frequency_rules():
+    return storage.get_frequency_rules()
+
+
+@app.delete("/spending/frequencies/{merchant}")
+def delete_frequency_rule(merchant: str):
+    storage.delete_frequency_rule(merchant)
     return {"ok": True}
 
 

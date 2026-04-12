@@ -10,6 +10,7 @@ import type {
   Source,
   SpendingBreakdown,
   SpendingCategory,
+  SpendingFrequency,
   StatusResponse,
   Subscription,
   Transaction,
@@ -135,6 +136,11 @@ export const api = {
     request<{ ok: boolean }>("/spending/categorize", {
       method: "PUT",
       body: JSON.stringify({ merchant_name, category }),
+    }),
+  setFrequency: (merchant_name: string, frequency: SpendingFrequency) =>
+    request<{ ok: boolean }>("/spending/frequency", {
+      method: "PUT",
+      body: JSON.stringify({ merchant_name, frequency }),
     }),
 
   // --- Goals
