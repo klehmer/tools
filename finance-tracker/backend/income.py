@@ -195,8 +195,17 @@ def _get_spending_transactions(
     window_days: int = 30,
     accounts: Optional[List[Dict]] = None,
 ) -> List[Dict]:
-    """Return deduplicated, non-transfer outflows from spending-eligible accounts."""
+    """Return deduplicated, non-transfer outflows from spending-eligible accounts.
+
+    Transfer detection uses counterpart matching: an outflow is only
+    filtered as an internal transfer if a matching inflow (same date and
+    amount) exists in a *different* active account. This means transfers
+    to ignored accounts are kept as spending — the money left the user's
+    tracked financial world.
+    """
     cutoff = datetime.utcnow() - timedelta(days=window_days)
+
+    all_active_ids = {a["account_id"] for a in (accounts or [])}
 
     if accounts:
         valid_ids = _account_ids_for_types(accounts, _SPENDING_ACCOUNT_TYPES)
@@ -205,6 +214,19 @@ def _get_spending_transactions(
         scoped = transactions
 
     scoped = _deduplicate(scoped)
+
+    # Index inflows across ALL active accounts (not just spending-eligible)
+    # for counterpart matching.  Key = (amount,) → list of (date, account_id).
+    # We match by amount and allow ±1 day for settlement differences.
+    inflow_by_amount: Dict[float, List[tuple]] = defaultdict(list)
+    for t in transactions:
+        aid = t.get("account_id", "")
+        if aid not in all_active_ids:
+            continue
+        if (t.get("amount") or 0) < 0 and not t.get("pending"):
+            amt = round(abs(float(t["amount"])), 2)
+            inflow_by_amount[amt].append((_parse_date(t["date"]), aid))
+
     result = []
     for t in scoped:
         if (t.get("amount") or 0) <= 0 or t.get("pending"):
@@ -212,7 +234,19 @@ def _get_spending_transactions(
         if _parse_date(t["date"]) < cutoff:
             continue
         if _looks_like_transfer(t):
-            continue
+            # Only filter if a matching inflow exists in a DIFFERENT active
+            # account within ±1 day (settlement dates can differ).
+            amt = round(float(t["amount"]), 2)
+            t_date = _parse_date(t["date"])
+            t_aid = t.get("account_id", "")
+            matched = False
+            for inf_date, inf_aid in inflow_by_amount.get(amt, []):
+                if inf_aid != t_aid and abs((inf_date - t_date).days) <= 1:
+                    matched = True
+                    break
+            if matched:
+                continue  # True internal transfer between active accounts
+            # No matching inflow in other active accounts → spending
         result.append(t)
     return result
 
