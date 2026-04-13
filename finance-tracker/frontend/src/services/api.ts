@@ -9,7 +9,7 @@ import type {
   PlanResponse,
   Source,
   SpendingBreakdown,
-  SpendingCategory,
+  SpendingCategoryDef,
   SpendingFrequency,
   StatusResponse,
   Subscription,
@@ -132,7 +132,7 @@ export const api = {
     request<IncomeSummary>(`/income?window_days=${windowDays}`),
   spending: (windowDays = 30) =>
     request<SpendingBreakdown>(`/spending?window_days=${windowDays}`),
-  categorize: (merchant_name: string, category: SpendingCategory) =>
+  categorize: (merchant_name: string, category: string) =>
     request<{ ok: boolean }>("/spending/categorize", {
       method: "PUT",
       body: JSON.stringify({ merchant_name, category }),
@@ -141,6 +141,24 @@ export const api = {
     request<{ ok: boolean }>("/spending/frequency", {
       method: "PUT",
       body: JSON.stringify({ merchant_name, frequency }),
+    }),
+
+  // --- Spending categories
+  listSpendingCategories: () =>
+    request<SpendingCategoryDef[]>("/spending/categories"),
+  createSpendingCategory: (cat: SpendingCategoryDef) =>
+    request<SpendingCategoryDef[]>("/spending/categories", {
+      method: "POST",
+      body: JSON.stringify(cat),
+    }),
+  updateSpendingCategory: (key: string, cat: SpendingCategoryDef) =>
+    request<SpendingCategoryDef[]>(`/spending/categories/${key}`, {
+      method: "PUT",
+      body: JSON.stringify(cat),
+    }),
+  deleteSpendingCategory: (key: string) =>
+    request<SpendingCategoryDef[]>(`/spending/categories/${key}`, {
+      method: "DELETE",
     }),
 
   // --- Goals

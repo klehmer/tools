@@ -158,13 +158,20 @@ class NetWorthSnapshot(BaseModel):
 
 # --- Subscriptions -----------------------------------------------------------
 
-SpendingCategory = Literal["subscription", "bill", "work_expense", "food", "vacation", "other"]
 SpendingFrequency = Literal["one_time", "weekly", "biweekly", "monthly", "quarterly", "annual"]
+
+
+class SpendingCategoryDef(BaseModel):
+    key: str
+    label: str
+    show_frequency: bool = False
+    collapsed: bool = False
+    position: int = 0
 
 
 class CategoryRuleRequest(BaseModel):
     merchant_name: str
-    category: SpendingCategory
+    category: str  # dynamic — any valid category key
 
 
 class FrequencyRuleRequest(BaseModel):
@@ -253,29 +260,21 @@ class PeriodProjection(BaseModel):
     annual: float
 
 
+class CategorySummary(BaseModel):
+    key: str
+    label: str
+    total_in_window: float
+    projection: PeriodProjection
+    transaction_count: int
+
+
 class DashboardSummary(BaseModel):
     net_worth: NetWorthSnapshot
     income: PeriodProjection
     spending: PeriodProjection
-    subscriptions: PeriodProjection
-    bills: PeriodProjection
     cash_flow: PeriodProjection
-    subscription_count: int
-    bill_count: int
+    category_summaries: List[CategorySummary]
     linked_source_count: int
     source_counts_by_kind: Dict[str, int]
     account_count: int
     last_synced_at: Optional[str] = None
-
-    # Keep legacy fields so existing frontend doesn't break during rollout
-    @property
-    def monthly_income(self) -> float:
-        return self.income.monthly
-
-    @property
-    def monthly_spending(self) -> float:
-        return self.spending.monthly
-
-    @property
-    def monthly_subscriptions_total(self) -> float:
-        return self.subscriptions.monthly

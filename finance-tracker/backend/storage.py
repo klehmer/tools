@@ -33,6 +33,16 @@ GOALS_FILE = DATA_DIR / "goals.json"
 META_FILE = DATA_DIR / "meta.json"
 CATEGORY_RULES_FILE = DATA_DIR / "category_rules.json"
 FREQUENCY_RULES_FILE = DATA_DIR / "frequency_rules.json"
+SPENDING_CATEGORIES_FILE = DATA_DIR / "spending_categories.json"
+
+DEFAULT_SPENDING_CATEGORIES = [
+    {"key": "subscription", "label": "Subscriptions", "show_frequency": True, "collapsed": False, "position": 0},
+    {"key": "bill", "label": "Recurring bills", "show_frequency": True, "collapsed": False, "position": 1},
+    {"key": "work_expense", "label": "Work expenses", "show_frequency": False, "collapsed": False, "position": 2},
+    {"key": "food", "label": "Food", "show_frequency": False, "collapsed": False, "position": 3},
+    {"key": "vacation", "label": "Vacation & recreation", "show_frequency": False, "collapsed": False, "position": 4},
+    {"key": "other", "label": "Other spending", "show_frequency": False, "collapsed": True, "position": 5},
+]
 
 # One-time migration from the old Plaid-only layout.
 LEGACY_ITEMS_FILE = DATA_DIR / "items.json"
@@ -448,3 +458,61 @@ def delete_frequency_rule(merchant: str) -> None:
         rules = get_frequency_rules()
         rules.pop(merchant, None)
         _write(FREQUENCY_RULES_FILE, rules)
+
+
+# --- Spending categories -----------------------------------------------------
+
+def get_spending_categories() -> List[Dict[str, Any]]:
+    with _lock:
+        cats = _read(SPENDING_CATEGORIES_FILE, None)
+        if cats is None:
+            cats = [dict(c) for c in DEFAULT_SPENDING_CATEGORIES]
+            _write(SPENDING_CATEGORIES_FILE, cats)
+        return cats
+
+
+def save_spending_categories(cats: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    with _lock:
+        _write(SPENDING_CATEGORIES_FILE, cats)
+        return cats
+
+
+def add_spending_category(cat: Dict[str, Any]) -> List[Dict[str, Any]]:
+    with _lock:
+        cats = get_spending_categories()
+        # Ensure unique key
+        existing_keys = {c["key"] for c in cats}
+        if cat["key"] in existing_keys:
+            raise ValueError(f"Category key '{cat['key']}' already exists")
+        cat.setdefault("position", len(cats))
+        cats.append(cat)
+        cats.sort(key=lambda c: c.get("position", 999))
+        _write(SPENDING_CATEGORIES_FILE, cats)
+        return cats
+
+
+def update_spending_category(key: str, updates: Dict[str, Any]) -> List[Dict[str, Any]]:
+    with _lock:
+        cats = get_spending_categories()
+        for c in cats:
+            if c["key"] == key:
+                c.update(updates)
+                # Don't allow changing the key via updates
+                c["key"] = key
+                break
+        else:
+            raise ValueError(f"Category '{key}' not found")
+        cats.sort(key=lambda c: c.get("position", 999))
+        _write(SPENDING_CATEGORIES_FILE, cats)
+        return cats
+
+
+def delete_spending_category(key: str) -> List[Dict[str, Any]]:
+    with _lock:
+        cats = get_spending_categories()
+        cats = [c for c in cats if c["key"] != key]
+        # Re-number positions
+        for i, c in enumerate(cats):
+            c["position"] = i
+        _write(SPENDING_CATEGORIES_FILE, cats)
+        return cats

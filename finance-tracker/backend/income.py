@@ -226,30 +226,7 @@ def monthly_spending(
     return round(sum(float(t["amount"]) for t in spending), 2)
 
 
-_BUCKET_NAMES = ("subscriptions", "bills", "work_expenses", "food", "vacation", "other")
-
-# Map category rule values → bucket keys
-_CATEGORY_TO_BUCKET = {
-    "subscription": "subscriptions",
-    "subscriptions": "subscriptions",
-    "bill": "bills",
-    "bills": "bills",
-    "work_expense": "work_expenses",
-    "work_expenses": "work_expenses",
-    "food": "food",
-    "vacation": "vacation",
-    "other": "other",
-}
-
-# Reverse: bucket key → canonical SpendingCategory value for the API response
-_BUCKET_TO_CATEGORY = {
-    "subscriptions": "subscription",
-    "bills": "bill",
-    "work_expenses": "work_expense",
-    "food": "food",
-    "vacation": "vacation",
-    "other": "other",
-}
+_DEFAULT_CATEGORY = "other"
 
 
 _CHECK_NUMBER_RE = re.compile(r"check\s*#?\s*(\d+)", re.IGNORECASE)
@@ -268,22 +245,21 @@ _FREQ_TO_MONTHLY: Dict[str, float] = {
 def spending_breakdown(
     transactions: List[Dict],
     merchant_categories: Dict[str, str],
+    category_defs: List[Dict[str, Any]],
     window_days: int = 30,
     accounts: Optional[List[Dict]] = None,
     frequency_rules: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
-    """Categorize spending into subscriptions, bills, work expenses, food, other.
+    """Categorize spending into user-defined categories.
 
-    ``merchant_categories`` maps normalized merchant names to a category
-    string. Both auto-detected (from subscriptions.py) and user-defined
-    rules should be merged before passing — user rules take priority.
-
-    ``frequency_rules`` maps normalized merchant names to a frequency string
-    (weekly, biweekly, monthly, quarterly, annual). Used to calculate
-    projected costs for subscription and bill buckets.
+    ``merchant_categories`` maps normalized merchant names to a category key.
+    ``category_defs`` is the ordered list of category definitions (from storage).
+    ``frequency_rules`` maps normalized merchant names to a frequency string.
     """
     frequency_rules = frequency_rules or {}
     spending = _get_spending_transactions(transactions, window_days, accounts)
+
+    valid_keys = {c["key"] for c in category_defs}
 
     # Build account lookup
     account_map: Dict[str, str] = {}
@@ -295,13 +271,15 @@ def spending_breakdown(
                 label = f"{inst} — {label}"
             account_map[a["account_id"]] = label
 
-    buckets: Dict[str, List[Dict[str, Any]]] = {k: [] for k in _BUCKET_NAMES}
-    totals: Dict[str, float] = {k: 0.0 for k in _BUCKET_NAMES}
+    buckets: Dict[str, List[Dict[str, Any]]] = {c["key"]: [] for c in category_defs}
+    totals: Dict[str, float] = {c["key"]: 0.0 for c in category_defs}
 
     for t in spending:
         merchant_key = _normalize_for_match(t.get("merchant_name") or t.get("name") or "")
-        raw_kind = merchant_categories.get(merchant_key, "other")
-        bucket = _CATEGORY_TO_BUCKET.get(raw_kind, "other")
+        cat_key = merchant_categories.get(merchant_key, _DEFAULT_CATEGORY)
+        # Fall back to "other" if the category key doesn't exist
+        if cat_key not in valid_keys:
+            cat_key = _DEFAULT_CATEGORY
 
         name = (t.get("name") or "").strip()
         entry: Dict[str, Any] = {
@@ -309,42 +287,47 @@ def spending_breakdown(
             "name": name,
             "amount": round(float(t["amount"]), 2),
             "merchant_key": merchant_key,
-            "category": _BUCKET_TO_CATEGORY.get(bucket, bucket),
+            "category": cat_key,
             "account_name": account_map.get(t.get("account_id", ""), ""),
         }
 
-        # Extract check number if present
         check_match = _CHECK_NUMBER_RE.search(name) or _CHECK_NUMBER_RE.search(
             t.get("merchant_name") or ""
         )
         if check_match:
             entry["check_number"] = check_match.group(1)
 
-        # Include frequency if set
         freq = frequency_rules.get(merchant_key)
         if freq:
             entry["frequency"] = freq
 
-        buckets[bucket].append(entry)
-        totals[bucket] += float(t["amount"])
+        buckets[cat_key].append(entry)
+        totals[cat_key] += float(t["amount"])
 
     for b in buckets.values():
         b.sort(key=lambda x: x["date"], reverse=True)
 
-    result: Dict[str, Any] = {
+    # Build response — categories is an ordered list
+    categories_out: List[Dict[str, Any]] = []
+    for cdef in category_defs:
+        k = cdef["key"]
+        bucket_data: Dict[str, Any] = {
+            "key": k,
+            "label": cdef["label"],
+            "show_frequency": cdef.get("show_frequency", False),
+            "collapsed": cdef.get("collapsed", False),
+            "total": round(totals.get(k, 0.0), 2),
+            "transactions": buckets.get(k, []),
+        }
+        if cdef.get("show_frequency"):
+            bucket_data.update(_compute_projected_costs(buckets.get(k, []), frequency_rules))
+        categories_out.append(bucket_data)
+
+    return {
         "window_days": window_days,
         "total": round(sum(totals.values()), 2),
+        "categories": categories_out,
     }
-    for k in _BUCKET_NAMES:
-        bucket_data: Dict[str, Any] = {
-            "total": round(totals[k], 2),
-            "transactions": buckets[k],
-        }
-        # For subscriptions and bills, compute projected costs from frequencies
-        if k in ("subscriptions", "bills"):
-            bucket_data.update(_compute_projected_costs(buckets[k], frequency_rules))
-        result[k] = bucket_data
-    return result
 
 
 def _compute_projected_costs(
@@ -352,7 +335,6 @@ def _compute_projected_costs(
     frequency_rules: Dict[str, str],
 ) -> Dict[str, Any]:
     """Aggregate per-merchant costs and project monthly/annual equivalents."""
-    # Group by merchant_key, compute average amount per merchant
     merchant_amounts: Dict[str, List[float]] = defaultdict(list)
     for t in transactions:
         merchant_amounts[t["merchant_key"]].append(t["amount"])

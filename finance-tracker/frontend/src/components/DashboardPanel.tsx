@@ -3,13 +3,41 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   PiggyBank,
-  Receipt,
-  Repeat,
   TrendingUp,
   Wallet,
 } from "lucide-react";
 import { api, formatCurrency } from "../services/api";
-import type { DashboardSummary, PeriodProjection } from "../types";
+import type { DashboardSummary, PeriodProjection, CategorySummary } from "../types";
+
+const CAT_COLORS = [
+  "text-indigo-700",
+  "text-amber-700",
+  "text-emerald-700",
+  "text-orange-700",
+  "text-cyan-700",
+  "text-slate-700",
+  "text-rose-700",
+  "text-purple-700",
+  "text-teal-700",
+  "text-pink-700",
+  "text-lime-700",
+  "text-sky-700",
+];
+
+const CAT_DOT_COLORS = [
+  "bg-indigo-500",
+  "bg-amber-500",
+  "bg-emerald-500",
+  "bg-orange-500",
+  "bg-cyan-500",
+  "bg-slate-500",
+  "bg-rose-500",
+  "bg-purple-500",
+  "bg-teal-500",
+  "bg-pink-500",
+  "bg-lime-500",
+  "bg-sky-500",
+];
 
 export function DashboardPanel() {
   const [data, setData] = useState<DashboardSummary | null>(null);
@@ -77,31 +105,22 @@ export function DashboardPanel() {
               tone="text-rose-700"
               prefix="-"
             />
-            <ProjectionRow
-              label={`Subscriptions (${data.subscription_count})`}
-              icon={<Repeat className="h-3.5 w-3.5 text-violet-500" />}
-              proj={data.subscriptions}
-              tone="text-violet-700"
-              indent
-            />
-            <ProjectionRow
-              label={`Bills (${data.bill_count})`}
-              icon={<Receipt className="h-3.5 w-3.5 text-amber-500" />}
-              proj={data.bills}
-              tone="text-amber-700"
-              indent
-            />
+            {data.category_summaries.map((cs, i) => (
+              <CategoryRow key={cs.key} cs={cs} colorIdx={i} />
+            ))}
             <tr className="border-t border-slate-200">
               <td className="py-2 font-semibold text-slate-900">Cash flow</td>
-              <td className={`py-2 text-right font-semibold tabular-nums ${data.cash_flow.monthly >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
-                {data.cash_flow.monthly >= 0 ? "+" : ""}{formatCurrency(data.cash_flow.monthly)}
-              </td>
-              <td className={`py-2 text-right font-semibold tabular-nums ${data.cash_flow.quarterly >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
-                {data.cash_flow.quarterly >= 0 ? "+" : ""}{formatCurrency(data.cash_flow.quarterly)}
-              </td>
-              <td className={`py-2 text-right font-semibold tabular-nums ${data.cash_flow.annual >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
-                {data.cash_flow.annual >= 0 ? "+" : ""}{formatCurrency(data.cash_flow.annual)}
-              </td>
+              {(["monthly", "quarterly", "annual"] as const).map((period) => (
+                <td
+                  key={period}
+                  className={`py-2 text-right font-semibold tabular-nums ${
+                    data.cash_flow[period] >= 0 ? "text-emerald-700" : "text-rose-700"
+                  }`}
+                >
+                  {data.cash_flow[period] >= 0 ? "+" : ""}
+                  {formatCurrency(data.cash_flow[period])}
+                </td>
+              ))}
             </tr>
           </tbody>
         </table>
@@ -143,28 +162,53 @@ export function DashboardPanel() {
   );
 }
 
+function CategoryRow({ cs, colorIdx }: { cs: CategorySummary; colorIdx: number }) {
+  const textColor = CAT_COLORS[colorIdx % CAT_COLORS.length];
+  const dotColor = CAT_DOT_COLORS[colorIdx % CAT_DOT_COLORS.length];
+  return (
+    <tr className="border-t border-slate-50">
+      <td className="py-2 pl-6">
+        <span className="flex items-center gap-1.5">
+          <span className={`inline-block h-2 w-2 rounded-full ${dotColor}`} />
+          <span className="text-xs text-slate-600">
+            {cs.label}
+            <span className="ml-1 text-slate-400">({cs.transaction_count})</span>
+          </span>
+        </span>
+      </td>
+      <td className={`py-2 text-right tabular-nums ${textColor}`}>
+        {formatCurrency(cs.projection.monthly)}
+      </td>
+      <td className={`py-2 text-right tabular-nums ${textColor}`}>
+        {formatCurrency(cs.projection.quarterly)}
+      </td>
+      <td className={`py-2 text-right tabular-nums ${textColor}`}>
+        {formatCurrency(cs.projection.annual)}
+      </td>
+    </tr>
+  );
+}
+
 function ProjectionRow({
   label,
   icon,
   proj,
   tone,
   prefix,
-  indent,
 }: {
   label: string;
   icon: React.ReactNode;
   proj: PeriodProjection;
   tone: string;
   prefix?: string;
-  indent?: boolean;
 }) {
   const fmt = (v: number) => `${prefix ?? ""}${formatCurrency(v)}`;
   return (
     <tr className="border-t border-slate-50">
-      <td className={`py-2 ${indent ? "pl-6" : ""}`}>
+      <td className="py-2">
         <span className="flex items-center gap-1.5">
           {icon}
-          <span className={`font-medium ${indent ? "text-slate-600 text-xs" : "text-slate-700"}`}>{label}</span>
+          <span className="font-medium text-slate-700">{label}</span>
         </span>
       </td>
       <td className={`py-2 text-right tabular-nums ${tone}`}>{fmt(proj.monthly)}</td>

@@ -28,8 +28,10 @@ from income import monthly_spending, spending_breakdown, summarize_income
 from models import (
     Account,
     CategoryRuleRequest,
+    CategorySummary,
     FrequencyRuleRequest,
     PeriodProjection,
+    SpendingCategoryDef,
     CsvImportResult,
     DashboardSummary,
     ExchangeTokenRequest,
@@ -469,21 +471,28 @@ def income(window_days: int = Query(90, ge=30, le=365)):
     return summarize_income(storage.list_transactions(), window_days=window_days, accounts=storage.list_accounts())
 
 
-@app.get("/spending")
-def spending(window_days: int = Query(30, ge=7, le=365)):
-    accs = storage.list_accounts()
-    txns = storage.list_transactions()
-    subs = detect_subscriptions(txns, accounts=accs)
-    # Build auto-detected merchant categories, then overlay user rules
+def _build_spending_breakdown(txns, accs, window_days: int = 30):
+    """Shared helper: builds a full spending breakdown with all user rules."""
     from subscriptions import _normalize_merchant
+    subs = detect_subscriptions(txns, accounts=accs)
     categories: dict = {}
     for s in subs:
         key = _normalize_merchant(s.merchant)
         categories[key] = "subscription" if s.kind == "subscription" else "bill"
-    # User rules take priority over auto-detection
     categories.update(storage.get_category_rules())
     freq_rules = storage.get_frequency_rules()
-    return spending_breakdown(txns, categories, window_days=window_days, accounts=accs, frequency_rules=freq_rules)
+    cat_defs = storage.get_spending_categories()
+    return spending_breakdown(
+        txns, categories, cat_defs,
+        window_days=window_days, accounts=accs, frequency_rules=freq_rules,
+    )
+
+
+@app.get("/spending")
+def spending(window_days: int = Query(30, ge=7, le=365)):
+    accs = storage.list_accounts()
+    txns = storage.list_transactions()
+    return _build_spending_breakdown(txns, accs, window_days)
 
 
 @app.put("/spending/categorize")
@@ -528,6 +537,36 @@ def delete_frequency_rule(merchant: str):
     return {"ok": True}
 
 
+@app.get("/spending/categories", response_model=List[SpendingCategoryDef])
+def list_spending_categories():
+    return [SpendingCategoryDef(**c) for c in storage.get_spending_categories()]
+
+
+@app.post("/spending/categories", response_model=List[SpendingCategoryDef])
+def create_spending_category(cat: SpendingCategoryDef):
+    try:
+        cats = storage.add_spending_category(cat.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return [SpendingCategoryDef(**c) for c in cats]
+
+
+@app.put("/spending/categories/{key}", response_model=List[SpendingCategoryDef])
+def update_spending_category(key: str, cat: SpendingCategoryDef):
+    try:
+        cats = storage.update_spending_category(key, cat.model_dump(exclude={"key"}))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return [SpendingCategoryDef(**c) for c in cats]
+
+
+@app.delete("/spending/categories/{key}", response_model=List[SpendingCategoryDef])
+def delete_spending_category(key: str):
+    cats = storage.delete_spending_category(key)
+    return [SpendingCategoryDef(**c) for c in cats]
+
+
+
 @app.get("/dashboard", response_model=DashboardSummary)
 def dashboard():
     accounts = storage.list_accounts()
@@ -535,26 +574,11 @@ def dashboard():
     sources = storage.list_sources()
     nw = compute_net_worth(accounts)
     inc = summarize_income(txns, window_days=90, accounts=accounts)
+    breakdown = _build_spending_breakdown(txns, accounts, window_days=90)
 
-    # Use spending breakdown with user frequency rules for accurate projections
-    subs = detect_subscriptions(txns, accounts=accounts)
-    from subscriptions import _normalize_merchant
-    categories: dict = {}
-    for s in subs:
-        key = _normalize_merchant(s.merchant)
-        categories[key] = "subscription" if s.kind == "subscription" else "bill"
-    categories.update(storage.get_category_rules())
-    freq_rules = storage.get_frequency_rules()
-    breakdown = spending_breakdown(txns, categories, window_days=90, accounts=accounts, frequency_rules=freq_rules)
-
-    subs_monthly = breakdown["subscriptions"].get("monthly_equivalent", 0.0)
-    bills_monthly = breakdown["bills"].get("monthly_equivalent", 0.0)
-    sub_merchants = {t["merchant_key"] for t in breakdown["subscriptions"]["transactions"]}
-    bill_merchants = {t["merchant_key"] for t in breakdown["bills"]["transactions"]}
-    spending_total = monthly_spending(txns, accounts=accounts)
-
+    spending_mo = monthly_spending(txns, accounts=accounts)
     income_mo = inc.total_monthly
-    spending_mo = spending_total
+    cash_flow_mo = income_mo - spending_mo
 
     def _proj(monthly: float) -> PeriodProjection:
         return PeriodProjection(
@@ -563,7 +587,20 @@ def dashboard():
             annual=round(monthly * 12, 2),
         )
 
-    cash_flow_mo = income_mo - spending_mo
+    # Build per-category summaries
+    cat_summaries: list = []
+    for cat_bucket in breakdown["categories"]:
+        monthly_eq = cat_bucket.get("monthly_equivalent", 0.0)
+        # For categories without frequency, estimate monthly from window total
+        if not cat_bucket.get("show_frequency") or monthly_eq == 0:
+            monthly_eq = cat_bucket["total"] / 3.0  # 90 day window ≈ 3 months
+        cat_summaries.append(CategorySummary(
+            key=cat_bucket["key"],
+            label=cat_bucket["label"],
+            total_in_window=cat_bucket["total"],
+            projection=_proj(monthly_eq),
+            transaction_count=len(cat_bucket["transactions"]),
+        ))
 
     last = max((s.get("last_synced_at") or "" for s in sources), default=None) or None
     kind_counts: dict = {}
@@ -573,11 +610,8 @@ def dashboard():
         net_worth=nw,
         income=_proj(income_mo),
         spending=_proj(spending_mo),
-        subscriptions=_proj(subs_monthly),
-        bills=_proj(bills_monthly),
         cash_flow=_proj(cash_flow_mo),
-        subscription_count=len(sub_merchants),
-        bill_count=len(bill_merchants),
+        category_summaries=cat_summaries,
         linked_source_count=len(sources),
         source_counts_by_kind=kind_counts,
         account_count=len(accounts),
@@ -609,18 +643,14 @@ def plan(req: PlanRequest):
     txns = storage.list_transactions()
     accs = storage.list_accounts()
     inc = summarize_income(txns, window_days=90, accounts=accs)
+    breakdown = _build_spending_breakdown(txns, accs, window_days=90)
 
-    # Use frequency-based projections consistent with dashboard
-    subs = detect_subscriptions(txns, accounts=accs)
-    from subscriptions import _normalize_merchant
-    categories: dict = {}
-    for s in subs:
-        key = _normalize_merchant(s.merchant)
-        categories[key] = "subscription" if s.kind == "subscription" else "bill"
-    categories.update(storage.get_category_rules())
-    freq_rules = storage.get_frequency_rules()
-    breakdown = spending_breakdown(txns, categories, window_days=90, accounts=accs, frequency_rules=freq_rules)
-    subs_monthly = breakdown["subscriptions"].get("monthly_equivalent", 0.0)
+    # Sum monthly equivalents from frequency-enabled categories (subscriptions, bills)
+    subs_monthly = sum(
+        c.get("monthly_equivalent", 0.0)
+        for c in breakdown["categories"]
+        if c.get("show_frequency")
+    )
 
     spending_total = monthly_spending(txns, accounts=accs)
     return build_plan(

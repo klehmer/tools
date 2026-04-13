@@ -135,27 +135,6 @@ export interface PlanResponse {
   summary: string;
 }
 
-export interface PeriodProjection {
-  monthly: number;
-  quarterly: number;
-  annual: number;
-}
-
-export interface DashboardSummary {
-  net_worth: NetWorthSnapshot;
-  income: PeriodProjection;
-  spending: PeriodProjection;
-  subscriptions: PeriodProjection;
-  bills: PeriodProjection;
-  cash_flow: PeriodProjection;
-  subscription_count: number;
-  bill_count: number;
-  linked_source_count: number;
-  source_counts_by_kind: Record<string, number>;
-  account_count: number;
-  last_synced_at?: string | null;
-}
-
 export interface StatusResponse {
   configured: boolean;
   env: string;
@@ -168,8 +147,15 @@ export interface StatusResponse {
   last_synced_at?: string | null;
 }
 
-export type SpendingCategory = "subscription" | "bill" | "work_expense" | "food" | "vacation" | "other";
 export type SpendingFrequency = "one_time" | "weekly" | "biweekly" | "monthly" | "quarterly" | "annual";
+
+export interface SpendingCategoryDef {
+  key: string;
+  label: string;
+  show_frequency: boolean;
+  collapsed: boolean;
+  position: number;
+}
 
 export interface SpendingTransaction {
   date: string;
@@ -183,6 +169,10 @@ export interface SpendingTransaction {
 }
 
 export interface SpendingBucket {
+  key: string;
+  label: string;
+  show_frequency: boolean;
+  collapsed: boolean;
   total: number;
   transactions: SpendingTransaction[];
   monthly_equivalent?: number;
@@ -192,12 +182,33 @@ export interface SpendingBucket {
 export interface SpendingBreakdown {
   window_days: number;
   total: number;
-  subscriptions: SpendingBucket;
-  bills: SpendingBucket;
-  work_expenses: SpendingBucket;
-  food: SpendingBucket;
-  vacation: SpendingBucket;
-  other: SpendingBucket;
+  categories: SpendingBucket[];
+}
+
+export interface PeriodProjection {
+  monthly: number;
+  quarterly: number;
+  annual: number;
+}
+
+export interface CategorySummary {
+  key: string;
+  label: string;
+  total_in_window: number;
+  projection: PeriodProjection;
+  transaction_count: number;
+}
+
+export interface DashboardSummary {
+  net_worth: NetWorthSnapshot;
+  income: PeriodProjection;
+  spending: PeriodProjection;
+  cash_flow: PeriodProjection;
+  category_summaries: CategorySummary[];
+  linked_source_count: number;
+  source_counts_by_kind: Record<string, number>;
+  account_count: number;
+  last_synced_at?: string | null;
 }
 
 export interface CsvImportResult {
