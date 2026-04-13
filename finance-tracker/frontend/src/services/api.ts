@@ -98,6 +98,11 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ current_balance }),
     }),
+  setAccountIgnored: (account_id: string, ignored: boolean) =>
+    request<Account>(`/accounts/${account_id}/ignore`, {
+      method: "PATCH",
+      body: JSON.stringify({ ignored }),
+    }),
   deleteAccount: (account_id: string) =>
     request<{ ok: boolean }>(`/accounts/${account_id}`, { method: "DELETE" }),
   importCsv: (account_id: string, file: File, sign_convention = "auto") => {

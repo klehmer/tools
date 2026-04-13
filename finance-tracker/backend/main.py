@@ -71,6 +71,21 @@ app.add_middleware(
 
 # --- helpers ----------------------------------------------------------------
 
+def _active_accounts() -> list:
+    """Return accounts that aren't ignored — used for all analytics."""
+    return [a for a in storage.list_accounts() if not a.get("ignored")]
+
+
+def _active_account_ids() -> set:
+    return {a["account_id"] for a in _active_accounts()}
+
+
+def _active_transactions() -> list:
+    """Return transactions belonging to non-ignored accounts."""
+    ids = _active_account_ids()
+    return [t for t in storage.list_transactions() if t.get("account_id") in ids]
+
+
 def _source_by_id(source_id: str) -> dict:
     source = storage.get_source(source_id)
     if not source:
@@ -340,6 +355,15 @@ def update_manual_balance(account_id: str, body: ManualBalanceUpdate):
     return Account(**acc)
 
 
+@app.patch("/accounts/{account_id}/ignore", response_model=Account)
+def set_account_ignored(account_id: str, body: dict):
+    ignored = body.get("ignored", True)
+    acc = storage.set_account_ignored(account_id, ignored)
+    if not acc:
+        raise HTTPException(status_code=404, detail="account not found")
+    return Account(**acc)
+
+
 @app.post("/accounts/{account_id}/transactions", response_model=Transaction)
 def add_manual_transaction(account_id: str, body: ManualTransactionInput):
     try:
@@ -458,17 +482,17 @@ def list_transactions(
 
 @app.get("/networth", response_model=NetWorthSnapshot)
 def networth():
-    return compute_net_worth(storage.list_accounts())
+    return compute_net_worth(_active_accounts())
 
 
 @app.get("/subscriptions", response_model=List[Subscription])
 def subscriptions():
-    return detect_subscriptions(storage.list_transactions(), accounts=storage.list_accounts())
+    return detect_subscriptions(_active_transactions(), accounts=_active_accounts())
 
 
 @app.get("/income")
 def income(window_days: int = Query(90, ge=30, le=365)):
-    return summarize_income(storage.list_transactions(), window_days=window_days, accounts=storage.list_accounts())
+    return summarize_income(_active_transactions(), window_days=window_days, accounts=_active_accounts())
 
 
 def _build_spending_breakdown(txns, accs, window_days: int = 30):
@@ -490,9 +514,7 @@ def _build_spending_breakdown(txns, accs, window_days: int = 30):
 
 @app.get("/spending")
 def spending(window_days: int = Query(30, ge=7, le=365)):
-    accs = storage.list_accounts()
-    txns = storage.list_transactions()
-    return _build_spending_breakdown(txns, accs, window_days)
+    return _build_spending_breakdown(_active_transactions(), _active_accounts(), window_days)
 
 
 @app.put("/spending/categorize")
@@ -569,8 +591,8 @@ def delete_spending_category(key: str):
 
 @app.get("/dashboard", response_model=DashboardSummary)
 def dashboard():
-    accounts = storage.list_accounts()
-    txns = storage.list_transactions()
+    accounts = _active_accounts()
+    txns = _active_transactions()
     sources = storage.list_sources()
     nw = compute_net_worth(accounts)
     inc = summarize_income(txns, window_days=90, accounts=accounts)
@@ -640,8 +662,8 @@ def delete_goal(goal_id: str):
 
 @app.post("/plan", response_model=PlanResponse)
 def plan(req: PlanRequest):
-    txns = storage.list_transactions()
-    accs = storage.list_accounts()
+    txns = _active_transactions()
+    accs = _active_accounts()
     inc = summarize_income(txns, window_days=90, accounts=accs)
     breakdown = _build_spending_breakdown(txns, accs, window_days=90)
 

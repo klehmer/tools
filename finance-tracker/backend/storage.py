@@ -303,6 +303,17 @@ def upsert_account(account: Dict[str, Any]) -> Dict[str, Any]:
         return account
 
 
+def set_account_ignored(account_id: str, ignored: bool) -> Optional[Dict[str, Any]]:
+    with _lock:
+        accs = list_accounts()
+        for a in accs:
+            if a["account_id"] == account_id:
+                a["ignored"] = ignored
+                _write(ACCOUNTS_FILE, accs)
+                return a
+        return None
+
+
 def delete_account(account_id: str) -> None:
     with _lock:
         accs = [a for a in list_accounts() if a["account_id"] != account_id]

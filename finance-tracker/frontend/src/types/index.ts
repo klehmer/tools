@@ -24,6 +24,7 @@ export interface Account {
   available_balance?: number | null;
   iso_currency_code?: string | null;
   manual: boolean;
+  ignored: boolean;
 }
 
 export interface ManualAccountInput {

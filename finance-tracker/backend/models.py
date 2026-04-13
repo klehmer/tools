@@ -85,6 +85,7 @@ class Account(BaseModel):
     available_balance: Optional[float] = None
     iso_currency_code: Optional[str] = "USD"
     manual: bool = False  # convenience: same as source_kind == "manual"
+    ignored: bool = False  # excluded from all analytics when True
 
 
 class ManualAccountInput(BaseModel):
