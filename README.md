@@ -1,6 +1,6 @@
 # Tools
 
-A collection of local-first productivity tools built with FastAPI backends and React/Vite/Tailwind frontends, all powered by Google APIs and AI summarization.
+A collection of local-first productivity tools built with FastAPI backends and React/Vite/Tailwind frontends.
 
 ## Calendar & Email Summary
 
@@ -20,15 +20,17 @@ AI-powered summaries of your Gmail inbox and Google Calendar. Pick a time period
 
 ## Finance Tracker
 
-Local-first personal finance dashboard. Links multiple financial institutions read-only through Plaid (Robinhood, PNC, Vanguard, Fidelity, Chase, Schwab, Coinbase, and 12,000+ others), then aggregates everything into net worth, subscriptions, income, and goal-based plans.
+Local-first personal finance dashboard. Aggregate accounts from Plaid (12,000+ institutions), SimpleFIN Bridge, or manual entry with CSV import — then see consolidated net worth, spending breakdowns, income analysis, and goal-based financial plans.
 
 **Key features:**
-- Read-only account linking via Plaid Link — no credentials stored locally
+- Multi-source aggregation: Plaid, SimpleFIN, and manual accounts with CSV import
 - Net worth with asset/liability breakdown (Cash, Investments, Retirement, Credit Cards, Loans, …)
-- Subscription detection: groups recurring charges by merchant, flags cadence + annualized cost
-- Income analysis over configurable 30–365 day windows
-- Goals & financial planning: add goals (savings, debt payoff, retirement, purchase) and project whether your cash flow supports them; get required monthly contributions and feasibility ratings
-- Link as many institutions as you want
+- Dynamic spending categories with user CRUD — create, rename, and delete categories from the UI
+- Frequency-based cost projections (weekly/biweekly/monthly/quarterly/annual) per merchant
+- Account ignore: exclude accounts from analytics while keeping them synced; transfers to ignored accounts count as spending via counterpart-based detection
+- Income analysis over configurable 30–365 day windows with per-source deposit history
+- Dashboard with monthly/quarterly/annual projections for income, spending, and cash flow
+- Goals & financial planning with feasibility ratings
 
 **Stack:** FastAPI, plaid-python, React, TypeScript, Tailwind CSS, react-plaid-link
 
@@ -70,4 +72,4 @@ cd finance-tracker
 # Open http://localhost:5175
 ```
 
-The Google-powered tools require Google Cloud OAuth 2.0 credentials (Gmail API + Calendar API or Drive API enabled). Finance Tracker requires a free Plaid developer account. See each tool's README for detailed setup instructions.
+The Google-powered tools require Google Cloud OAuth 2.0 credentials (Gmail API + Calendar API or Drive API enabled). Finance Tracker supports Plaid, SimpleFIN, and manual account entry — see its README for setup details.
