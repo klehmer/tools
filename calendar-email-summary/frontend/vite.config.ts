@@ -11,6 +11,7 @@ export default defineConfig({
       "/summary": "http://localhost:8001",
       "/jobs": "http://localhost:8001",
       "/reports": "http://localhost:8001",
+      "/checklist": "http://localhost:8001",
     },
   },
 });

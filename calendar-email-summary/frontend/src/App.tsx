@@ -16,6 +16,7 @@ type State = "loading" | "setup" | "login" | "app";
 export default function App() {
   const [state, setState] = useState<State>("loading");
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [googleConfigured, setGoogleConfigured] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -40,6 +41,15 @@ export default function App() {
         setState("setup");
         return;
       }
+      setGoogleConfigured(status.google_configured);
+
+      // If Google isn't configured, skip login and go straight to dashboard
+      // (only planner will be available)
+      if (!status.google_configured) {
+        setState("app");
+        return;
+      }
+
       if (!getSessionToken()) {
         setState("login");
         return;
@@ -73,5 +83,5 @@ export default function App() {
     return <LoginPage error={authError} />;
   }
 
-  return <Dashboard profile={profile!} />;
+  return <Dashboard profile={profile} googleConfigured={googleConfigured} onSettingsChanged={bootstrap} />;
 }

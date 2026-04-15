@@ -13,6 +13,7 @@ FIELDS = [
     "AI_MODEL",
     "DEFAULT_PERIOD",
     "DEFAULT_DIRECTION",
+    "PLANNER_COLUMN_WIDTH",
     "BACKEND_URL",
     "FRONTEND_URL",
 ]
@@ -22,6 +23,7 @@ DEFAULTS = {
     "AI_MODEL": "",
     "DEFAULT_PERIOD": "week",
     "DEFAULT_DIRECTION": "past",
+    "PLANNER_COLUMN_WIDTH": "220",
     "BACKEND_URL": "http://localhost:8001",
     "FRONTEND_URL": "http://localhost:5174",
 }
@@ -57,16 +59,20 @@ def _is_secret(field: str) -> bool:
 
 
 def is_configured() -> bool:
+    """True when the minimum config has been saved (AI provider set up).
+
+    Google OAuth credentials are optional at initial setup — they're
+    only needed for email/calendar features, not the planner.
+    """
     env = _read_env()
-    provider = env.get("AI_PROVIDER") or os.getenv("AI_PROVIDER", "anthropic")
+    provider = env.get("AI_PROVIDER") or os.getenv("AI_PROVIDER", "")
 
-    # Google creds always required
-    for f in ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]:
-        v = env.get(f) or os.getenv(f, "")
-        if not v or v == f"your_{f.lower()}_here":
-            return False
+    # If no provider has been explicitly chosen, the user hasn't gone
+    # through setup yet (the .env file won't have AI_PROVIDER at all).
+    if not provider:
+        return False
 
-    # AI key required for anthropic/openai, not for claude-code
+    # AI key required for anthropic/openai, not for CLI providers
     if provider == "anthropic":
         v = env.get("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
         if not v or v == "your_anthropic_api_key_here":
@@ -76,6 +82,16 @@ def is_configured() -> bool:
         if not v or v == "your_openai_api_key_here":
             return False
 
+    return True
+
+
+def is_google_configured() -> bool:
+    """True when Google OAuth credentials have been provided."""
+    env = _read_env()
+    for f in ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]:
+        v = env.get(f) or os.getenv(f, "")
+        if not v or v == f"your_{f.lower()}_here":
+            return False
     return True
 
 

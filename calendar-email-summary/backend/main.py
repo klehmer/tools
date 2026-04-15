@@ -16,6 +16,7 @@ import config_manager
 import scheduler
 from google_service import GoogleService
 from summarizer import summarize_emails, summarize_events
+import checklist
 
 
 @asynccontextmanager
@@ -53,7 +54,10 @@ def get_google(session_token: str = Depends(get_session_token)) -> GoogleService
 # ---- Config ----
 @app.get("/config/status")
 def config_status():
-    return {"configured": config_manager.is_configured()}
+    return {
+        "configured": config_manager.is_configured(),
+        "google_configured": config_manager.is_google_configured(),
+    }
 
 
 @app.get("/config")
@@ -70,6 +74,7 @@ class ConfigUpdate(BaseModel):
     AI_MODEL: Optional[str] = None
     DEFAULT_PERIOD: Optional[str] = None
     DEFAULT_DIRECTION: Optional[str] = None
+    PLANNER_COLUMN_WIDTH: Optional[str] = None
     BACKEND_URL: Optional[str] = None
     FRONTEND_URL: Optional[str] = None
 
@@ -203,4 +208,61 @@ def get_report(report_id: str):
 def delete_report(report_id: str):
     if not scheduler.delete_report(report_id):
         raise HTTPException(status_code=404, detail="Report not found")
+    return {"ok": True}
+
+
+# ---- Checklist / Planner ----
+class ChecklistCreate(BaseModel):
+    text: str
+    date: str  # YYYY-MM-DD
+    sort_order: int = 0
+    priority: bool = False
+
+
+class ChecklistUpdate(BaseModel):
+    text: Optional[str] = None
+    date: Optional[str] = None
+    done: Optional[bool] = None
+    sort_order: Optional[int] = None
+    priority: Optional[bool] = None
+
+
+class ChecklistReorder(BaseModel):
+    item_ids: list[str]
+
+
+@app.get("/checklist")
+def get_checklist(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    done: Optional[bool] = None,
+):
+    return checklist.list_items(date_from=date_from, date_to=date_to, done=done)
+
+
+@app.post("/checklist")
+def create_checklist_item(body: ChecklistCreate):
+    return checklist.create_item(
+        text=body.text, item_date=body.date,
+        sort_order=body.sort_order, priority=body.priority,
+    )
+
+
+@app.put("/checklist/{item_id}")
+def update_checklist_item(item_id: str, body: ChecklistUpdate):
+    item = checklist.update_item(item_id, body.model_dump())
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return item
+
+
+@app.post("/checklist/reorder")
+def reorder_checklist(body: ChecklistReorder):
+    return checklist.reorder_items(body.item_ids)
+
+
+@app.delete("/checklist/{item_id}")
+def delete_checklist_item(item_id: str):
+    if not checklist.delete_item(item_id):
+        raise HTTPException(status_code=404, detail="Item not found")
     return {"ok": True}

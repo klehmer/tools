@@ -65,23 +65,77 @@ class TestGetConfig:
 
 
 class TestIsConfigured:
-    def test_true_when_all_required_set(self, _temp_env):
-        _temp_env.write_text(
-            "GOOGLE_CLIENT_ID=id\nGOOGLE_CLIENT_SECRET=secret\nANTHROPIC_API_KEY=key\n"
-        )
+    def test_true_with_anthropic_provider_and_key(self, _temp_env):
+        _temp_env.write_text("AI_PROVIDER=anthropic\nANTHROPIC_API_KEY=key\n")
         assert config_manager.is_configured() is True
 
-    def test_false_when_missing_key(self, _temp_env):
-        _temp_env.write_text("GOOGLE_CLIENT_ID=id\nGOOGLE_CLIENT_SECRET=secret\n")
-        os.environ.pop("ANTHROPIC_API_KEY", None)
+    def test_true_with_claude_code_no_key(self, _temp_env):
+        _temp_env.write_text("AI_PROVIDER=claude-code\n")
+        assert config_manager.is_configured() is True
+
+    def test_true_with_codex_no_key(self, _temp_env):
+        _temp_env.write_text("AI_PROVIDER=codex\n")
+        assert config_manager.is_configured() is True
+
+    def test_true_with_openai_provider_and_key(self, _temp_env):
+        _temp_env.write_text("AI_PROVIDER=openai\nOPENAI_API_KEY=key\n")
+        assert config_manager.is_configured() is True
+
+    def test_false_when_no_provider_set(self, _temp_env, monkeypatch):
+        _temp_env.write_text("")
+        monkeypatch.delenv("AI_PROVIDER", raising=False)
         assert config_manager.is_configured() is False
 
-    def test_false_when_placeholder(self, _temp_env):
-        _temp_env.write_text(
-            "GOOGLE_CLIENT_ID=your_google_client_id_here\nGOOGLE_CLIENT_SECRET=s\nANTHROPIC_API_KEY=k\n"
-        )
-        os.environ.pop("GOOGLE_CLIENT_ID", None)
+    def test_false_when_anthropic_missing_key(self, _temp_env, monkeypatch):
+        _temp_env.write_text("AI_PROVIDER=anthropic\n")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         assert config_manager.is_configured() is False
+
+    def test_false_when_anthropic_placeholder_key(self, _temp_env, monkeypatch):
+        _temp_env.write_text("AI_PROVIDER=anthropic\nANTHROPIC_API_KEY=your_anthropic_api_key_here\n")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        assert config_manager.is_configured() is False
+
+    def test_false_when_openai_missing_key(self, _temp_env, monkeypatch):
+        _temp_env.write_text("AI_PROVIDER=openai\n")
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        assert config_manager.is_configured() is False
+
+    def test_false_when_openai_placeholder_key(self, _temp_env, monkeypatch):
+        _temp_env.write_text("AI_PROVIDER=openai\nOPENAI_API_KEY=your_openai_api_key_here\n")
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        assert config_manager.is_configured() is False
+
+    def test_does_not_require_google_creds(self, _temp_env):
+        _temp_env.write_text("AI_PROVIDER=claude-code\n")
+        assert config_manager.is_configured() is True
+
+
+class TestIsGoogleConfigured:
+    def test_true_when_both_set(self, _temp_env):
+        _temp_env.write_text("GOOGLE_CLIENT_ID=id\nGOOGLE_CLIENT_SECRET=secret\n")
+        assert config_manager.is_google_configured() is True
+
+    def test_false_when_id_missing(self, _temp_env, monkeypatch):
+        _temp_env.write_text("GOOGLE_CLIENT_SECRET=secret\n")
+        monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+        assert config_manager.is_google_configured() is False
+
+    def test_false_when_secret_missing(self, _temp_env, monkeypatch):
+        _temp_env.write_text("GOOGLE_CLIENT_ID=id\n")
+        monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
+        assert config_manager.is_google_configured() is False
+
+    def test_false_when_placeholder(self, _temp_env, monkeypatch):
+        _temp_env.write_text("GOOGLE_CLIENT_ID=your_google_client_id_here\nGOOGLE_CLIENT_SECRET=s\n")
+        monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+        assert config_manager.is_google_configured() is False
+
+    def test_false_when_empty(self, _temp_env, monkeypatch):
+        _temp_env.write_text("")
+        monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+        monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
+        assert config_manager.is_google_configured() is False
 
 
 class TestSaveConfig:

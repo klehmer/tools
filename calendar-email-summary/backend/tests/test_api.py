@@ -9,7 +9,9 @@ class TestConfigRoutes:
     def test_config_status(self, client):
         resp = client.get("/config/status")
         assert resp.status_code == 200
-        assert "configured" in resp.json()
+        data = resp.json()
+        assert "configured" in data
+        assert "google_configured" in data
 
     def test_get_config(self, client):
         resp = client.get("/config")

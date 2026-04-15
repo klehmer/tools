@@ -1,4 +1,4 @@
-import type { AppConfig, Direction, Period, Report, ScheduledJob, SummaryResult, UserProfile } from "../types";
+import type { AppConfig, ChecklistItem, Direction, Period, Report, ScheduledJob, SummaryResult, UserProfile } from "../types";
 
 const SESSION_KEY = "ces_session";
 
@@ -29,7 +29,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export const getConfigStatus = () => request<{ configured: boolean }>("/config/status");
+export const getConfigStatus = () => request<{ configured: boolean; google_configured: boolean }>("/config/status");
 export const getConfig = () => request<AppConfig>("/config");
 export const saveConfig = (data: Record<string, string>) =>
   request<{ ok: boolean }>("/config", { method: "POST", body: JSON.stringify(data) });
@@ -66,3 +66,29 @@ export const getReports = (jobId?: string, limit = 50) => {
 export const getReport = (id: string) => request<Report>(`/reports/${id}`);
 export const deleteReport = (id: string) =>
   request<{ ok: boolean }>(`/reports/${id}`, { method: "DELETE" });
+
+// --- Checklist / Planner ---
+export const getChecklist = (dateFrom?: string, dateTo?: string, done?: boolean) => {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("date_from", dateFrom);
+  if (dateTo) params.set("date_to", dateTo);
+  if (done !== undefined) params.set("done", String(done));
+  return request<ChecklistItem[]>(`/checklist?${params}`);
+};
+export const createChecklistItem = (text: string, date: string, sort_order = 0, priority = false) =>
+  request<ChecklistItem>("/checklist", {
+    method: "POST",
+    body: JSON.stringify({ text, date, sort_order, priority }),
+  });
+export const updateChecklistItem = (id: string, data: Partial<Pick<ChecklistItem, "text" | "date" | "done" | "sort_order" | "priority">>) =>
+  request<ChecklistItem>(`/checklist/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+export const reorderChecklist = (itemIds: string[]) =>
+  request<ChecklistItem[]>("/checklist/reorder", {
+    method: "POST",
+    body: JSON.stringify({ item_ids: itemIds }),
+  });
+export const deleteChecklistItem = (id: string) =>
+  request<{ ok: boolean }>(`/checklist/${id}`, { method: "DELETE" });

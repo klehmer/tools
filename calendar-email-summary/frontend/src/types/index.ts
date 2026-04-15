@@ -16,6 +16,7 @@ export interface AppConfig {
   AI_MODEL: ConfigField;
   DEFAULT_PERIOD: ConfigField;
   DEFAULT_DIRECTION: ConfigField;
+  PLANNER_COLUMN_WIDTH: ConfigField;
   BACKEND_URL: ConfigField;
   FRONTEND_URL: ConfigField;
 }
@@ -92,4 +93,16 @@ export interface Report {
     email?: SummaryResult;
     calendar?: SummaryResult;
   };
+}
+
+// --- Checklist / Planner ---
+
+export interface ChecklistItem {
+  id: string;
+  text: string;
+  date: string; // YYYY-MM-DD
+  done: boolean;
+  priority: boolean;
+  sort_order: number;
+  created_at: string;
 }

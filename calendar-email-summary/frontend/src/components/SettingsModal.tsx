@@ -19,6 +19,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     AI_MODEL: "",
     DEFAULT_PERIOD: "week",
     DEFAULT_DIRECTION: "past",
+    PLANNER_COLUMN_WIDTH: "220",
     BACKEND_URL: "http://localhost:8001",
     FRONTEND_URL: "http://localhost:5174",
   });
@@ -88,19 +89,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
       <div className="bg-white rounded-2xl shadow-xl p-6 max-w-lg w-full space-y-5 my-6">
         <h2 className="text-xl font-bold">Configuration</h2>
 
-        {/* Google OAuth */}
-        <section className={sectionCls}>
-          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Google OAuth</h3>
-          <div>
-            <label className={labelCls}>Client ID</label>
-            <input type="text" value={fields.GOOGLE_CLIENT_ID} onChange={(e) => set("GOOGLE_CLIENT_ID", e.target.value)} className={inputCls} />
-          </div>
-          {secretInput("GOOGLE_CLIENT_SECRET", "Client Secret")}
-        </section>
-
-        <hr className="border-slate-200" />
-
-        {/* AI Provider */}
+        {/* AI Provider — shown first so users pick their provider before entering keys */}
         <section className={sectionCls}>
           <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">AI Provider</h3>
           <div>
@@ -124,7 +113,23 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          <p className="text-xs text-slate-500">{MODEL_HINTS[provider]}</p>
+          <p className="text-xs text-slate-500">
+            {MODEL_HINTS[provider]}
+            {(provider === "claude-code" || provider === "codex") && " — no API key needed."}
+          </p>
+        </section>
+
+        <hr className="border-slate-200" />
+
+        {/* Google OAuth */}
+        <section className={sectionCls}>
+          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Google OAuth</h3>
+          <p className="text-xs text-slate-500">Required for accessing your Gmail and Google Calendar.</p>
+          <div>
+            <label className={labelCls}>Client ID</label>
+            <input type="text" value={fields.GOOGLE_CLIENT_ID} onChange={(e) => set("GOOGLE_CLIENT_ID", e.target.value)} className={inputCls} />
+          </div>
+          {secretInput("GOOGLE_CLIENT_SECRET", "Client Secret")}
         </section>
 
         <hr className="border-slate-200" />
@@ -148,6 +153,29 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                 <option value="past">Previous</option>
                 <option value="future">Upcoming</option>
               </select>
+            </div>
+          </div>
+        </section>
+
+        <hr className="border-slate-200" />
+
+        {/* Planner */}
+        <section className={sectionCls}>
+          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Planner</h3>
+          <div>
+            <label className={labelCls}>Column Width: {fields.PLANNER_COLUMN_WIDTH || 220}px</label>
+            <input
+              type="range"
+              min={160}
+              max={400}
+              step={10}
+              value={fields.PLANNER_COLUMN_WIDTH || "220"}
+              onChange={(e) => set("PLANNER_COLUMN_WIDTH", e.target.value)}
+              className="w-full accent-indigo-600"
+            />
+            <div className="flex justify-between text-xs text-slate-400">
+              <span>Compact</span>
+              <span>Wide</span>
             </div>
           </div>
         </section>
