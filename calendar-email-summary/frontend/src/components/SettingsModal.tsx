@@ -85,7 +85,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   );
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-6 z-50 overflow-auto">
+    <div className="fixed inset-0 bg-black/50 flex items-start justify-center p-6 z-50 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-xl p-6 max-w-lg w-full space-y-5 my-6">
         <h2 className="text-xl font-bold">Configuration</h2>
 
