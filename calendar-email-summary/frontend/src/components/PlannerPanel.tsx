@@ -70,6 +70,8 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
   const [dropTarget, setDropTarget] = useState<{ date: string; index: number } | null>(null);
   const [columnWidth, setColumnWidth] = useState(220);
   const inputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const todayRef = useRef<HTMLDivElement>(null);
 
   const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const dateFrom = fmt(weekDates[0]);
@@ -89,6 +91,15 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
   useEffect(() => {
     if (activeInput && inputRef.current) inputRef.current.focus();
   }, [activeInput]);
+
+  useEffect(() => {
+    if (!loading && scrollRef.current && todayRef.current) {
+      const container = scrollRef.current;
+      const todayEl = todayRef.current;
+      const scrollLeft = todayEl.offsetLeft - container.offsetWidth / 2 + todayEl.offsetWidth / 2;
+      container.scrollTo({ left: Math.max(0, scrollLeft), behavior: "smooth" });
+    }
+  }, [loading]);
 
   const fetchItems = async () => {
     setLoading(true);
@@ -252,7 +263,7 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
       {loading ? (
         <p className="text-slate-500">Loading...</p>
       ) : (
-        <div className="overflow-x-auto pb-2">
+        <div className="overflow-x-auto pb-2" ref={scrollRef}>
         <div className="flex gap-3" style={{ minWidth: `${columnWidth * 7 + 6 * 12}px` }}>
           {weekDates.map((d) => {
             const ds = fmt(d);
@@ -264,6 +275,7 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
             return (
               <div
                 key={ds}
+                ref={isToday ? todayRef : undefined}
                 style={{ width: columnWidth, minWidth: columnWidth }}
                 className={`rounded-xl border-2 p-4 min-h-[280px] flex flex-col flex-shrink-0 transition-colors ${
                   isDropHere && dragItem
