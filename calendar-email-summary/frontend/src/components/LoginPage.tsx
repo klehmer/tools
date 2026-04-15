@@ -15,7 +15,7 @@ export default function LoginPage({ error }: { error?: string | null }) {
           <Calendar size={32} />
         </div>
         <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold">Calendar & Email Summary</h1>
+          <h1 className="text-2xl font-bold">DayBrief</h1>
           <p className="text-slate-600 text-sm">
             AI-powered summaries of your inbox and calendar over any time period.
           </p>

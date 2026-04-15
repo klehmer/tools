@@ -39,7 +39,7 @@ export default function Dashboard({ profile, googleConfigured, onSettingsChanged
       <header className="bg-white border-b border-slate-200">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-bold">Calendar & Email Summary</h1>
+            <h1 className="text-lg font-bold">DayBrief</h1>
             {profile && <p className="text-xs text-slate-500">{profile.email}</p>}
           </div>
           <div className="flex items-center gap-2">

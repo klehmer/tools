@@ -1,4 +1,4 @@
-"""FastAPI app: Calendar & Email Summary."""
+"""FastAPI app: DayBrief."""
 import os
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     scheduler.stop_scheduler()
 
 
-app = FastAPI(title="Calendar & Email Summary", lifespan=lifespan)
+app = FastAPI(title="DayBrief", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

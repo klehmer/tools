@@ -1,4 +1,4 @@
-# Calendar & Email Summary
+# DayBrief
 
 AI-powered summaries of your Gmail inbox and Google Calendar over any time period.
 Modeled on the `gmail-manager` app — same OAuth flow, FastAPI backend, React/Vite/Tailwind frontend.
