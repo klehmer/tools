@@ -19,7 +19,7 @@ FIELDS = [
 ]
 
 DEFAULTS = {
-    "AI_PROVIDER": "anthropic",
+    "AI_PROVIDER": "claude-code",
     "AI_MODEL": "",
     "DEFAULT_PERIOD": "week",
     "DEFAULT_DIRECTION": "past",
@@ -59,20 +59,24 @@ def _is_secret(field: str) -> bool:
 
 
 def is_configured() -> bool:
-    """True when the minimum config has been saved (AI provider set up).
+    """True once initial setup has been completed.
 
-    Google OAuth credentials are optional at initial setup — they're
-    only needed for email/calendar features, not the planner.
+    We just check whether the .env file has been written with an
+    AI_PROVIDER value.  Google OAuth and API keys are optional at
+    initial setup — the planner works without them.
     """
     env = _read_env()
-    provider = env.get("AI_PROVIDER") or os.getenv("AI_PROVIDER", "")
+    # AI_PROVIDER is written by save_config during setup.
+    # If it's present in the .env, setup was completed.
+    return bool(env.get("AI_PROVIDER"))
 
-    # If no provider has been explicitly chosen, the user hasn't gone
-    # through setup yet (the .env file won't have AI_PROVIDER at all).
+
+def is_ai_configured() -> bool:
+    """True when the AI provider has the credentials it needs."""
+    env = _read_env()
+    provider = env.get("AI_PROVIDER") or os.getenv("AI_PROVIDER", "")
     if not provider:
         return False
-
-    # AI key required for anthropic/openai, not for CLI providers
     if provider == "anthropic":
         v = env.get("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
         if not v or v == "your_anthropic_api_key_here":
@@ -81,7 +85,6 @@ def is_configured() -> bool:
         v = env.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
         if not v or v == "your_openai_api_key_here":
             return False
-
     return True
 
 

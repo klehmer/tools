@@ -65,50 +65,72 @@ class TestGetConfig:
 
 
 class TestIsConfigured:
-    def test_true_with_anthropic_provider_and_key(self, _temp_env):
-        _temp_env.write_text("AI_PROVIDER=anthropic\nANTHROPIC_API_KEY=key\n")
-        assert config_manager.is_configured() is True
-
-    def test_true_with_claude_code_no_key(self, _temp_env):
+    def test_true_when_provider_set(self, _temp_env):
         _temp_env.write_text("AI_PROVIDER=claude-code\n")
         assert config_manager.is_configured() is True
 
-    def test_true_with_codex_no_key(self, _temp_env):
-        _temp_env.write_text("AI_PROVIDER=codex\n")
-        assert config_manager.is_configured() is True
-
-    def test_true_with_openai_provider_and_key(self, _temp_env):
-        _temp_env.write_text("AI_PROVIDER=openai\nOPENAI_API_KEY=key\n")
-        assert config_manager.is_configured() is True
-
-    def test_false_when_no_provider_set(self, _temp_env, monkeypatch):
-        _temp_env.write_text("")
-        monkeypatch.delenv("AI_PROVIDER", raising=False)
-        assert config_manager.is_configured() is False
-
-    def test_false_when_anthropic_missing_key(self, _temp_env, monkeypatch):
+    def test_true_with_any_provider(self, _temp_env):
         _temp_env.write_text("AI_PROVIDER=anthropic\n")
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        assert config_manager.is_configured() is True
+
+    def test_false_when_no_env_file(self):
         assert config_manager.is_configured() is False
 
-    def test_false_when_anthropic_placeholder_key(self, _temp_env, monkeypatch):
-        _temp_env.write_text("AI_PROVIDER=anthropic\nANTHROPIC_API_KEY=your_anthropic_api_key_here\n")
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        assert config_manager.is_configured() is False
-
-    def test_false_when_openai_missing_key(self, _temp_env, monkeypatch):
-        _temp_env.write_text("AI_PROVIDER=openai\n")
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        assert config_manager.is_configured() is False
-
-    def test_false_when_openai_placeholder_key(self, _temp_env, monkeypatch):
-        _temp_env.write_text("AI_PROVIDER=openai\nOPENAI_API_KEY=your_openai_api_key_here\n")
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    def test_false_when_empty_env_file(self, _temp_env):
+        _temp_env.write_text("")
         assert config_manager.is_configured() is False
 
     def test_does_not_require_google_creds(self, _temp_env):
         _temp_env.write_text("AI_PROVIDER=claude-code\n")
         assert config_manager.is_configured() is True
+
+    def test_does_not_require_api_key(self, _temp_env, monkeypatch):
+        _temp_env.write_text("AI_PROVIDER=anthropic\n")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        assert config_manager.is_configured() is True
+
+
+class TestIsAiConfigured:
+    def test_true_with_anthropic_and_key(self, _temp_env):
+        _temp_env.write_text("AI_PROVIDER=anthropic\nANTHROPIC_API_KEY=key\n")
+        assert config_manager.is_ai_configured() is True
+
+    def test_true_with_claude_code_no_key(self, _temp_env):
+        _temp_env.write_text("AI_PROVIDER=claude-code\n")
+        assert config_manager.is_ai_configured() is True
+
+    def test_true_with_codex_no_key(self, _temp_env):
+        _temp_env.write_text("AI_PROVIDER=codex\n")
+        assert config_manager.is_ai_configured() is True
+
+    def test_true_with_openai_and_key(self, _temp_env):
+        _temp_env.write_text("AI_PROVIDER=openai\nOPENAI_API_KEY=key\n")
+        assert config_manager.is_ai_configured() is True
+
+    def test_false_when_no_provider(self, _temp_env, monkeypatch):
+        _temp_env.write_text("")
+        monkeypatch.delenv("AI_PROVIDER", raising=False)
+        assert config_manager.is_ai_configured() is False
+
+    def test_false_when_anthropic_missing_key(self, _temp_env, monkeypatch):
+        _temp_env.write_text("AI_PROVIDER=anthropic\n")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        assert config_manager.is_ai_configured() is False
+
+    def test_false_when_anthropic_placeholder_key(self, _temp_env, monkeypatch):
+        _temp_env.write_text("AI_PROVIDER=anthropic\nANTHROPIC_API_KEY=your_anthropic_api_key_here\n")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        assert config_manager.is_ai_configured() is False
+
+    def test_false_when_openai_missing_key(self, _temp_env, monkeypatch):
+        _temp_env.write_text("AI_PROVIDER=openai\n")
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        assert config_manager.is_ai_configured() is False
+
+    def test_false_when_openai_placeholder_key(self, _temp_env, monkeypatch):
+        _temp_env.write_text("AI_PROVIDER=openai\nOPENAI_API_KEY=your_openai_api_key_here\n")
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        assert config_manager.is_ai_configured() is False
 
 
 class TestIsGoogleConfigured:

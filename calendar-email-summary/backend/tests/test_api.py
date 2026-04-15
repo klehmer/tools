@@ -12,6 +12,7 @@ class TestConfigRoutes:
         data = resp.json()
         assert "configured" in data
         assert "google_configured" in data
+        assert "ai_configured" in data
 
     def test_get_config(self, client):
         resp = client.get("/config")

@@ -29,7 +29,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export const getConfigStatus = () => request<{ configured: boolean; google_configured: boolean }>("/config/status");
+export const getConfigStatus = () => request<{ configured: boolean; google_configured: boolean; ai_configured: boolean }>("/config/status");
 export const getConfig = () => request<AppConfig>("/config");
 export const saveConfig = (data: Record<string, string>) =>
   request<{ ok: boolean }>("/config", { method: "POST", body: JSON.stringify(data) });

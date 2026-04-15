@@ -57,6 +57,7 @@ def config_status():
     return {
         "configured": config_manager.is_configured(),
         "google_configured": config_manager.is_google_configured(),
+        "ai_configured": config_manager.is_ai_configured(),
     }
 
 

@@ -15,7 +15,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     GOOGLE_CLIENT_SECRET: "",
     ANTHROPIC_API_KEY: "",
     OPENAI_API_KEY: "",
-    AI_PROVIDER: "anthropic",
+    AI_PROVIDER: "claude-code",
     AI_MODEL: "",
     DEFAULT_PERIOD: "week",
     DEFAULT_DIRECTION: "past",
@@ -45,7 +45,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   }, []);
 
   const set = (k: string, v: string) => setFields((f) => ({ ...f, [k]: v }));
-  const provider = (fields.AI_PROVIDER || "anthropic") as AIProvider;
+  const provider = (fields.AI_PROVIDER || "claude-code") as AIProvider;
 
   const handleSave = async () => {
     setSaving(true);
@@ -123,8 +123,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
         {/* Google OAuth */}
         <section className={sectionCls}>
-          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Google OAuth</h3>
-          <p className="text-xs text-slate-500">Required for accessing your Gmail and Google Calendar.</p>
+          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Google OAuth <span className="text-slate-400 font-normal normal-case">(optional)</span></h3>
+          <p className="text-xs text-slate-500">Needed for email/calendar summaries. You can skip this and add it later — the Planner works without it.</p>
           <div>
             <label className={labelCls}>Client ID</label>
             <input type="text" value={fields.GOOGLE_CLIENT_ID} onChange={(e) => set("GOOGLE_CLIENT_ID", e.target.value)} className={inputCls} />
