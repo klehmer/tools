@@ -1,18 +1,23 @@
 import { useEffect, useState } from "react";
-import { Loader2, Sparkles } from "lucide-react";
+import { Archive, Check, Loader2, Send, Sparkles } from "lucide-react";
 import type { Direction, Period, SummaryResult } from "../types";
-import { getDefaults, summarizeCalendar, summarizeEmails } from "../services/api";
+import { getDefaults, saveReport, sendToSlack, summarizeCalendar, summarizeEmails } from "../services/api";
 
 type Mode = "emails" | "calendar";
 
-export default function SummaryPanel() {
-  const [mode, setMode] = useState<Mode>("emails");
+export default function SummaryPanel({ defaultMode }: { defaultMode?: Mode }) {
+  const [mode, setMode] = useState<Mode>(defaultMode ?? "emails");
   const [period, setPeriod] = useState<Period>("week");
   const [direction, setDirection] = useState<Direction>("past");
   const [provider, setProvider] = useState<string>("anthropic");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SummaryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [slackSending, setSlackSending] = useState(false);
+  const [slackSent, setSlackSent] = useState(false);
+  const [slackError, setSlackError] = useState<string | null>(null);
+  const [reportSaving, setReportSaving] = useState(false);
+  const [reportSaved, setReportSaved] = useState(false);
 
   useEffect(() => {
     getDefaults()
@@ -28,6 +33,9 @@ export default function SummaryPanel() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setSlackSent(false);
+    setSlackError(null);
+    setReportSaved(false);
     try {
       const r =
         mode === "emails"
@@ -38,6 +46,36 @@ export default function SummaryPanel() {
       setError(e.message ?? String(e));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSendToSlack = async () => {
+    if (!result) return;
+    setSlackSending(true);
+    setSlackError(null);
+    try {
+      await sendToSlack(result, mode, period, mode === "calendar" ? direction : undefined);
+      setSlackSent(true);
+    } catch (e: any) {
+      setSlackError(e.message ?? "Failed to send to Slack");
+    } finally {
+      setSlackSending(false);
+    }
+  };
+
+  const handleSaveReport = async () => {
+    if (!result) return;
+    setReportSaving(true);
+    try {
+      const key = mode === "emails" ? "email" : "calendar";
+      const dirLabel = mode === "calendar" ? ` (${direction} ${period})` : ` (${period})`;
+      const name = `Ad-hoc ${mode === "emails" ? "Email" : "Calendar"} Summary${dirLabel}`;
+      await saveReport(name, { [key]: result });
+      setReportSaved(true);
+    } catch {
+      // silently fail — not critical
+    } finally {
+      setReportSaving(false);
     }
   };
 
@@ -84,6 +122,7 @@ export default function SummaryPanel() {
               className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
             >
               <option value="past">Previous</option>
+              <option value="current">Current</option>
               <option value="future">Upcoming</option>
             </select>
           )}
@@ -101,7 +140,7 @@ export default function SummaryPanel() {
           <span>
             {mode === "emails"
               ? `Summarize inbox emails from the previous ${period}.`
-              : `Summarize ${direction === "past" ? "previous" : "upcoming"} ${period} of calendar events.`}
+              : `Summarize ${direction === "past" ? "previous" : direction === "current" ? "current" : "upcoming"} ${period} of calendar events.`}
           </span>
           <span className="ml-auto text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
             {providerLabel[provider] ?? provider}
@@ -164,6 +203,47 @@ export default function SummaryPanel() {
               </ul>
             </div>
           )}
+
+          {/* Actions */}
+          <div className="flex items-center gap-3 pt-3 border-t border-slate-100 flex-wrap">
+            <button
+              onClick={handleSaveReport}
+              disabled={reportSaving || reportSaved}
+              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                reportSaved
+                  ? "bg-green-100 text-green-700"
+                  : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+              } disabled:opacity-60`}
+            >
+              {reportSaved ? (
+                <><Check size={15} /> Saved</>
+              ) : reportSaving ? (
+                <><Loader2 size={15} className="animate-spin" /> Saving...</>
+              ) : (
+                <><Archive size={15} /> Save to Reports</>
+              )}
+            </button>
+            <button
+              onClick={handleSendToSlack}
+              disabled={slackSending || slackSent}
+              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                slackSent
+                  ? "bg-green-100 text-green-700"
+                  : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+              } disabled:opacity-60`}
+            >
+              {slackSent ? (
+                <><Check size={15} /> Sent to Slack</>
+              ) : slackSending ? (
+                <><Loader2 size={15} className="animate-spin" /> Sending...</>
+              ) : (
+                <><Send size={15} /> Send to Slack</>
+              )}
+            </button>
+            {slackError && (
+              <span className="text-sm text-red-600">{slackError}</span>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -14,6 +14,10 @@ FIELDS = [
     "DEFAULT_PERIOD",
     "DEFAULT_DIRECTION",
     "PLANNER_COLUMN_WIDTH",
+    "DEFAULT_TAB",
+    "EMAIL_PROMPT_RULES",
+    "CALENDAR_PROMPT_RULES",
+    "SLACK_WEBHOOK_URL",
     "BACKEND_URL",
     "FRONTEND_URL",
 ]
@@ -24,6 +28,7 @@ DEFAULTS = {
     "DEFAULT_PERIOD": "week",
     "DEFAULT_DIRECTION": "past",
     "PLANNER_COLUMN_WIDTH": "220",
+    "DEFAULT_TAB": "planner",
     "BACKEND_URL": "http://localhost:8001",
     "FRONTEND_URL": "http://localhost:5174",
 }
@@ -46,7 +51,8 @@ def get_config() -> dict:
     env = _read_env()
     result = {}
     for f in FIELDS:
-        val = env.get(f) or os.getenv(f, "") or DEFAULTS.get(f, "")
+        raw = env.get(f) or os.getenv(f, "") or DEFAULTS.get(f, "")
+        val = _decode_multiline(f, raw)
         result[f] = {
             "value": val if not _is_secret(f) else ("***" if val else ""),
             "configured": bool(val) and val != f"your_{f.lower()}_here",
@@ -54,8 +60,38 @@ def get_config() -> dict:
     return result
 
 
+_MULTILINE_FIELDS = {"EMAIL_PROMPT_RULES", "CALENDAR_PROMPT_RULES"}
+
+
+def _encode_multiline(field: str, value: str) -> str:
+    """Encode newlines for .env storage."""
+    if field in _MULTILINE_FIELDS:
+        return value.replace("\\", "\\\\").replace("\n", "\\n")
+    return value
+
+
+def _decode_multiline(field: str, value: str) -> str:
+    """Decode escaped newlines from .env storage."""
+    if field in _MULTILINE_FIELDS:
+        # Replace \\n back to literal \n, then \n to newline
+        result = []
+        i = 0
+        while i < len(value):
+            if i + 1 < len(value) and value[i] == "\\" and value[i + 1] == "n":
+                result.append("\n")
+                i += 2
+            elif i + 1 < len(value) and value[i] == "\\" and value[i + 1] == "\\":
+                result.append("\\")
+                i += 2
+            else:
+                result.append(value[i])
+                i += 1
+        return "".join(result)
+    return value
+
+
 def _is_secret(field: str) -> bool:
-    return "SECRET" in field or "KEY" in field
+    return "SECRET" in field or "KEY" in field or "WEBHOOK" in field
 
 
 def is_configured() -> bool:
@@ -102,7 +138,9 @@ def save_config(updates: dict) -> None:
     env = _read_env()
     for k, v in updates.items():
         if k in FIELDS and v is not None and v != "***":
-            env[k] = v
+            encoded = _encode_multiline(k, v)
+            env[k] = encoded
+            # Set decoded value in os.environ so summarizer sees it immediately
             os.environ[k] = v
     lines = [f"{k}={env.get(k, '')}" for k in FIELDS]
     ENV_PATH.write_text("\n".join(lines) + "\n")

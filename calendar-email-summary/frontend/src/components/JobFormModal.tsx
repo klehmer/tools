@@ -37,6 +37,8 @@ export default function JobFormModal({ job, onClose }: Props) {
   const [notification, setNotification] = useState<JobNotification>(
     job?.notification ?? { enabled: true, style: "banner" }
   );
+  const [runMissed, setRunMissed] = useState(job?.run_missed ?? false);
+  const [sendToSlack, setSendToSlack] = useState(job?.send_to_slack ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -68,6 +70,8 @@ export default function JobFormModal({ job, onClose }: Props) {
         schedule,
         tasks,
         notification,
+        run_missed: runMissed,
+        send_to_slack: sendToSlack,
         session_token: getSessionToken() ?? "",
       };
       if (job) {
@@ -224,6 +228,7 @@ export default function JobFormModal({ job, onClose }: Props) {
                     className={inputCls}
                   >
                     <option value="past">Previous</option>
+                    <option value="current">Current</option>
                     <option value="future">Upcoming</option>
                   </select>
                 </div>
@@ -259,6 +264,50 @@ export default function JobFormModal({ job, onClose }: Props) {
               </select>
             </div>
           )}
+        </section>
+
+        <hr className="border-slate-200" />
+
+        {/* Slack */}
+        <section className={sectionCls}>
+          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Slack</h3>
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={sendToSlack}
+              onChange={(e) => setSendToSlack(e.target.checked)}
+              className="rounded mt-0.5"
+            />
+            <div>
+              <span className="font-medium">Send results to Slack</span>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Posts the summary to your configured Slack webhook when the job completes.
+                Configure the webhook URL in Settings &gt; Integrations.
+              </p>
+            </div>
+          </label>
+        </section>
+
+        <hr className="border-slate-200" />
+
+        {/* Missed runs */}
+        <section className={sectionCls}>
+          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Missed Runs</h3>
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={runMissed}
+              onChange={(e) => setRunMissed(e.target.checked)}
+              className="rounded mt-0.5"
+            />
+            <div>
+              <span className="font-medium">Run automatically if missed</span>
+              <p className="text-xs text-slate-500 mt-0.5">
+                If your laptop was asleep or off during the scheduled time, the job will run
+                automatically the next time the app starts.
+              </p>
+            </div>
+          </label>
         </section>
 
         {/* Actions */}

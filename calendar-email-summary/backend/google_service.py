@@ -1,6 +1,6 @@
 """Read-only wrapper around Gmail and Google Calendar."""
 import base64
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from typing import Optional
 
 from google.oauth2.credentials import Credentials
@@ -83,11 +83,98 @@ class GoogleService:
     # ---- Calendar ----
     def fetch_events(self, period: str, direction: str = "future") -> list[dict]:
         delta = _period_to_timedelta(period)
-        now = datetime.now(tz=timezone.utc)
-        if direction == "past":
-            time_min, time_max = now - delta, now
+        # Use local time for calendar day boundaries so "today" matches the user's timezone
+        local_now = datetime.now().astimezone()
+        local_tz = local_now.tzinfo
+        today_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow_start = today_start + timedelta(days=1)
+
+        if direction == "current":
+            if period == "day":
+                time_min, time_max = today_start, tomorrow_start
+            elif period == "week":
+                weekday = today_start.weekday()  # Mon=0
+                week_start = today_start - timedelta(days=weekday)
+                time_min, time_max = week_start, week_start + timedelta(days=7)
+            elif period == "month":
+                month_start = today_start.replace(day=1)
+                next_month = (month_start.month % 12) + 1
+                next_year = month_start.year + (1 if next_month == 1 else 0)
+                month_end = month_start.replace(year=next_year, month=next_month)
+                time_min, time_max = month_start, month_end
+            elif period == "quarter":
+                q_month = ((today_start.month - 1) // 3) * 3 + 1
+                q_start = today_start.replace(month=q_month, day=1)
+                q_end_month = q_month + 3
+                q_end_year = q_start.year
+                if q_end_month > 12:
+                    q_end_month -= 12
+                    q_end_year += 1
+                q_end = q_start.replace(year=q_end_year, month=q_end_month, day=1)
+                time_min, time_max = q_start, q_end
+            else:
+                time_min, time_max = today_start, tomorrow_start
+        elif direction == "past":
+            # Previous: the full prior day/week/etc ending at start of today
+            if period == "day":
+                time_min, time_max = today_start - timedelta(days=1), today_start
+            elif period == "week":
+                weekday = today_start.weekday()
+                this_week_start = today_start - timedelta(days=weekday)
+                time_min, time_max = this_week_start - timedelta(days=7), this_week_start
+            elif period == "month":
+                month_start = today_start.replace(day=1)
+                prev_month_end = month_start
+                prev_month_start = (month_start - timedelta(days=1)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                if local_tz:
+                    prev_month_start = prev_month_start.replace(tzinfo=local_tz)
+                time_min, time_max = prev_month_start, prev_month_end
+            elif period == "quarter":
+                q_month = ((today_start.month - 1) // 3) * 3 + 1
+                q_start = today_start.replace(month=q_month, day=1)
+                prev_q_end = q_start
+                prev_q_start_month = q_month - 3
+                prev_q_start_year = q_start.year
+                if prev_q_start_month < 1:
+                    prev_q_start_month += 12
+                    prev_q_start_year -= 1
+                prev_q_start = today_start.replace(year=prev_q_start_year, month=prev_q_start_month, day=1)
+                time_min, time_max = prev_q_start, prev_q_end
+            else:
+                time_min, time_max = today_start - timedelta(days=1), today_start
         else:
-            time_min, time_max = now, now + delta
+            # Upcoming/future: the next full day/week/etc starting after today
+            if period == "day":
+                time_min, time_max = tomorrow_start, tomorrow_start + timedelta(days=1)
+            elif period == "week":
+                weekday = today_start.weekday()
+                next_week_start = today_start - timedelta(days=weekday) + timedelta(days=7)
+                time_min, time_max = next_week_start, next_week_start + timedelta(days=7)
+            elif period == "month":
+                next_month_num = (today_start.month % 12) + 1
+                next_month_year = today_start.year + (1 if next_month_num == 1 else 0)
+                next_month_start = today_start.replace(year=next_month_year, month=next_month_num, day=1)
+                after_month_num = (next_month_num % 12) + 1
+                after_month_year = next_month_year + (1 if after_month_num == 1 else 0)
+                next_month_end = today_start.replace(year=after_month_year, month=after_month_num, day=1)
+                time_min, time_max = next_month_start, next_month_end
+            elif period == "quarter":
+                q_month = ((today_start.month - 1) // 3) * 3 + 1
+                next_q_month = q_month + 3
+                next_q_year = today_start.year
+                if next_q_month > 12:
+                    next_q_month -= 12
+                    next_q_year += 1
+                next_q_start = today_start.replace(year=next_q_year, month=next_q_month, day=1)
+                after_q_month = next_q_month + 3
+                after_q_year = next_q_year
+                if after_q_month > 12:
+                    after_q_month -= 12
+                    after_q_year += 1
+                next_q_end = today_start.replace(year=after_q_year, month=after_q_month, day=1)
+                time_min, time_max = next_q_start, next_q_end
+            else:
+                time_min, time_max = tomorrow_start, tomorrow_start + timedelta(days=1)
 
         events: list[dict] = []
         page_token: Optional[str] = None

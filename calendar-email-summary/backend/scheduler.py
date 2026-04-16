@@ -4,7 +4,7 @@ import logging
 import os
 import subprocess
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Thread
 from typing import Optional
@@ -13,6 +13,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 import auth
+import slack_notifier
 from google_service import GoogleService
 from summarizer import summarize_emails, summarize_events
 
@@ -63,6 +64,8 @@ def create_job(data: dict) -> dict:
         "schedule": data.get("schedule", {"type": "daily", "time": "08:00"}),
         "tasks": data.get("tasks", []),
         "notification": data.get("notification", {"enabled": False, "style": "banner"}),
+        "run_missed": data.get("run_missed", False),
+        "send_to_slack": data.get("send_to_slack", False),
         "session_token": data.get("session_token", ""),
         "created_at": datetime.now().isoformat(),
         "last_run": None,
@@ -83,7 +86,7 @@ def update_job(job_id: str, updates: dict) -> Optional[dict]:
         if j["id"] == job_id:
             _unschedule_job(job_id)
             # Apply updates but protect internal fields
-            for key in ("name", "enabled", "schedule", "tasks", "notification", "session_token"):
+            for key in ("name", "enabled", "schedule", "tasks", "notification", "run_missed", "send_to_slack", "session_token"):
                 if key in updates:
                     j[key] = updates[key]
             jobs[i] = j
@@ -114,10 +117,13 @@ def start_scheduler() -> None:
         return
     _scheduler = BackgroundScheduler(daemon=True)
     _scheduler.start()
-    for job in _load_jobs():
+    jobs = _load_jobs()
+    for job in jobs:
         if job.get("enabled", True):
             _schedule_job(job)
-    logger.info("Scheduler started with %d jobs", len(_load_jobs()))
+    logger.info("Scheduler started with %d jobs", len(jobs))
+    # Check for missed jobs and run them
+    _run_missed_jobs(jobs)
 
 
 def stop_scheduler() -> None:
@@ -126,6 +132,47 @@ def stop_scheduler() -> None:
         _scheduler.shutdown(wait=False)
         _scheduler = None
         logger.info("Scheduler stopped")
+
+
+def _schedule_interval(schedule: dict) -> timedelta:
+    """Return the approximate interval between runs for a schedule type."""
+    stype = schedule.get("type", "daily")
+    return {
+        "hourly": timedelta(hours=1),
+        "daily": timedelta(days=1),
+        "weekdays": timedelta(days=1),
+        "weekly": timedelta(weeks=1),
+        "monthly": timedelta(days=30),
+    }.get(stype, timedelta(days=1))
+
+
+def _run_missed_jobs(jobs: list[dict]) -> None:
+    """On startup, check for enabled jobs with run_missed=True that should
+    have fired while the app was not running, and execute them now."""
+    now = datetime.now()
+    for job in jobs:
+        if not job.get("enabled", True):
+            continue
+        if not job.get("run_missed", False):
+            continue
+        last_run_str = job.get("last_run")
+        if not last_run_str:
+            # Never run before — run it now
+            logger.info("Missed job %s (never run) — running now", job["id"])
+            Thread(target=_execute_job, args=(job["id"],), daemon=True).start()
+            continue
+        try:
+            last_run = datetime.fromisoformat(last_run_str)
+        except (ValueError, TypeError):
+            continue
+        interval = _schedule_interval(job.get("schedule", {}))
+        # If more than one interval has passed since last run, it was missed
+        if now - last_run > interval:
+            logger.info(
+                "Missed job %s (last run: %s, interval: %s) — running now",
+                job["id"], last_run_str, interval,
+            )
+            Thread(target=_execute_job, args=(job["id"],), daemon=True).start()
 
 
 def _build_trigger(schedule: dict) -> CronTrigger:
@@ -222,6 +269,9 @@ def _execute_job(job_id: str) -> None:
         if notification.get("enabled", False):
             _send_notification(job, results, notification)
 
+        if job.get("send_to_slack", False):
+            _send_slack(job, results)
+
     except Exception as e:
         logger.exception("Job %s failed", job_id)
         _update_job_status(job_id, "error", str(e)[:500])
@@ -264,12 +314,74 @@ def _save_report(job: dict, results: dict) -> dict:
     return report
 
 
+def save_analytics_report(name: str, analytics: dict, source_report_ids: list[str]) -> dict:
+    """Save an analytics report."""
+    report = {
+        "id": str(uuid.uuid4()),
+        "type": "analytics",
+        "name": name,
+        "analytics": analytics,
+        "source_report_ids": source_report_ids,
+        "created_at": datetime.now().isoformat(),
+    }
+    report_file = _REPORTS_DIR / f"analytics_{report['id']}.json"
+    report_file.write_text(json.dumps(report, indent=2, default=str))
+    return report
+
+
+def get_analytics_reports() -> list[dict]:
+    """Return all saved analytics reports, newest first."""
+    reports: list[dict] = []
+    if not _REPORTS_DIR.exists():
+        return reports
+    for f in sorted(_REPORTS_DIR.glob("analytics_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            reports.append(json.loads(f.read_text()))
+        except Exception:
+            continue
+    return reports
+
+
+def get_analytics_report(report_id: str) -> Optional[dict]:
+    report_file = _REPORTS_DIR / f"analytics_{report_id}.json"
+    if not report_file.exists():
+        return None
+    try:
+        return json.loads(report_file.read_text())
+    except Exception:
+        return None
+
+
+def delete_analytics_report(report_id: str) -> bool:
+    report_file = _REPORTS_DIR / f"analytics_{report_id}.json"
+    if not report_file.exists():
+        return False
+    report_file.unlink()
+    return True
+
+
+def save_adhoc_report(name: str, results: dict) -> dict:
+    """Save an ad-hoc summary (not from a scheduled job) to report history."""
+    report = {
+        "id": str(uuid.uuid4()),
+        "job_id": "adhoc",
+        "job_name": name,
+        "created_at": datetime.now().isoformat(),
+        "results": results,
+    }
+    report_file = _REPORTS_DIR / f"{report['id']}.json"
+    report_file.write_text(json.dumps(report, indent=2, default=str))
+    return report
+
+
 def get_reports(job_id: Optional[str] = None, limit: int = 50) -> list[dict]:
     """Return reports, newest first. Optionally filter by job_id."""
     reports: list[dict] = []
     if not _REPORTS_DIR.exists():
         return reports
     for f in sorted(_REPORTS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        if f.name.startswith("analytics_"):
+            continue
         try:
             report = json.loads(f.read_text())
             if job_id and report.get("job_id") != job_id:
@@ -335,3 +447,25 @@ def _send_notification(job: dict, results: dict, notification: dict) -> None:
             subprocess.run(["osascript", "-e", script], capture_output=True, timeout=10)
     except Exception:
         logger.exception("Failed to send macOS notification")
+
+
+def _send_slack(job: dict, results: dict) -> None:
+    """Send each task result to Slack via the configured webhook."""
+    webhook_url = os.getenv("SLACK_WEBHOOK_URL", "")
+    if not webhook_url:
+        logger.warning("Job %s has send_to_slack enabled but no webhook URL configured", job["id"])
+        return
+    try:
+        for task in job.get("tasks", []):
+            task_type = task.get("type")
+            period = task.get("period", "week")
+            result_key = task_type  # "email" or "calendar"
+            result = results.get(result_key)
+            if not result:
+                continue
+            direction = task.get("direction") if task_type == "calendar" else None
+            mode = "emails" if task_type == "email" else "calendar"
+            payload = slack_notifier.format_summary_for_slack(result, mode, period, direction)
+            slack_notifier.send_to_slack(webhook_url, payload)
+    except Exception:
+        logger.exception("Failed to send Slack notification for job %s", job["id"])

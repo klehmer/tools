@@ -2,11 +2,38 @@ import { useEffect, useState } from "react";
 import { getConfig, saveConfig } from "../services/api";
 import type { AIProvider } from "../types";
 
-const MODEL_HINTS: Record<AIProvider, string> = {
-  anthropic: "e.g. claude-haiku-4-5, claude-sonnet-4-5",
-  "claude-code": "Uses your local Claude Code CLI",
-  codex: "Uses your local Codex CLI",
-  openai: "e.g. gpt-4o-mini, gpt-4o, o3",
+const PROVIDER_MODELS: Record<AIProvider, { value: string; label: string }[]> = {
+  anthropic: [
+    { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
+    { value: "claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
+    { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+    { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
+  ],
+  "claude-code": [
+    { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
+    { value: "claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
+    { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+    { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
+  ],
+  codex: [
+    { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+    { value: "gpt-4o", label: "GPT-4o" },
+    { value: "o3", label: "o3" },
+    { value: "o4-mini", label: "o4-mini" },
+  ],
+  openai: [
+    { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+    { value: "gpt-4o", label: "GPT-4o" },
+    { value: "o3", label: "o3" },
+    { value: "o4-mini", label: "o4-mini" },
+  ],
+};
+
+const PROVIDER_HINTS: Record<AIProvider, string> = {
+  anthropic: "Anthropic API — requires API key",
+  "claude-code": "Uses your local Claude Code CLI — no API key needed.",
+  codex: "Uses your local Codex CLI — no API key needed.",
+  openai: "OpenAI API — requires API key",
 };
 
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
@@ -20,6 +47,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     DEFAULT_PERIOD: "week",
     DEFAULT_DIRECTION: "past",
     PLANNER_COLUMN_WIDTH: "220",
+    DEFAULT_TAB: "planner",
+    EMAIL_PROMPT_RULES: "",
+    CALENDAR_PROMPT_RULES: "",
+    SLACK_WEBHOOK_URL: "",
     BACKEND_URL: "http://localhost:8001",
     FRONTEND_URL: "http://localhost:5174",
   });
@@ -56,6 +87,9 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
         if (v) payload[k] = v;
       });
       await saveConfig(payload);
+      if (fields.DEFAULT_TAB) {
+        localStorage.setItem("daybrief_default_tab", fields.DEFAULT_TAB);
+      }
       setSaving(false);
       onClose();
     } catch (e) {
@@ -106,16 +140,17 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
           {provider === "openai" && secretInput("OPENAI_API_KEY", "OpenAI API Key")}
 
-          {provider !== "claude-code" && provider !== "codex" && (
-            <div>
-              <label className={labelCls}>Model</label>
-              <input type="text" value={fields.AI_MODEL} onChange={(e) => set("AI_MODEL", e.target.value)} className={inputCls} placeholder={MODEL_HINTS[provider]} />
-            </div>
-          )}
+          <div>
+            <label className={labelCls}>Model</label>
+            <select value={fields.AI_MODEL} onChange={(e) => set("AI_MODEL", e.target.value)} className={inputCls}>
+              {PROVIDER_MODELS[provider]?.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          </div>
 
           <p className="text-xs text-slate-500">
-            {MODEL_HINTS[provider]}
-            {(provider === "claude-code" || provider === "codex") && " — no API key needed."}
+            {PROVIDER_HINTS[provider]}
           </p>
         </section>
 
@@ -134,9 +169,20 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
         <hr className="border-slate-200" />
 
-        {/* Summary Defaults */}
+        {/* Defaults */}
         <section className={sectionCls}>
-          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Summary Defaults</h3>
+          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Defaults</h3>
+          <div>
+            <label className={labelCls}>Default View</label>
+            <select value={fields.DEFAULT_TAB || "planner"} onChange={(e) => set("DEFAULT_TAB", e.target.value)} className={inputCls}>
+              <option value="summary-emails">Summary - Emails</option>
+              <option value="summary-calendar">Summary - Calendar</option>
+              <option value="planner">Planner</option>
+              <option value="reports">Reports</option>
+              <option value="schedule">Scheduled Jobs</option>
+              <option value="analytics">Analytics</option>
+            </select>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Default Period</label>
@@ -151,9 +197,40 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               <label className={labelCls}>Calendar Direction</label>
               <select value={fields.DEFAULT_DIRECTION || "past"} onChange={(e) => set("DEFAULT_DIRECTION", e.target.value)} className={inputCls}>
                 <option value="past">Previous</option>
+                <option value="current">Current</option>
                 <option value="future">Upcoming</option>
               </select>
             </div>
+          </div>
+        </section>
+
+        <hr className="border-slate-200" />
+
+        {/* Prompt Rules */}
+        <section className={sectionCls}>
+          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Summary Rules</h3>
+          <p className="text-xs text-slate-500">
+            Custom instructions for the AI when generating summaries. Use these to filter, prioritize, or shape the output.
+          </p>
+          <div>
+            <label className={labelCls}>Email Summary Rules</label>
+            <textarea
+              value={fields.EMAIL_PROMPT_RULES}
+              onChange={(e) => set("EMAIL_PROMPT_RULES", e.target.value)}
+              className={inputCls + " resize-y"}
+              rows={3}
+              placeholder="e.g. Ignore all emails from github.com and noreply senders. Prioritize emails from my manager (jane@company.com)."
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Calendar Summary Rules</label>
+            <textarea
+              value={fields.CALENDAR_PROMPT_RULES}
+              onChange={(e) => set("CALENDAR_PROMPT_RULES", e.target.value)}
+              className={inputCls + " resize-y"}
+              rows={3}
+              placeholder="e.g. Ignore recurring standup meetings. Focus on meetings with external attendees. Flag any meetings longer than 1 hour."
+            />
           </div>
         </section>
 
@@ -178,6 +255,18 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               <span>Wide</span>
             </div>
           </div>
+        </section>
+
+        <hr className="border-slate-200" />
+
+        {/* Integrations */}
+        <section className={sectionCls}>
+          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Integrations</h3>
+          {secretInput("SLACK_WEBHOOK_URL", "Slack Webhook URL")}
+          <p className="text-xs text-slate-500">
+            Create an Incoming Webhook at your Slack app's settings page.
+            The target channel or DM is set when you create the webhook.
+          </p>
         </section>
 
         <hr className="border-slate-200" />

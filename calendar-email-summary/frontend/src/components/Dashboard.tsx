@@ -2,12 +2,14 @@ import { useState } from "react";
 import { LogOut, Settings } from "lucide-react";
 import type { UserProfile } from "../types";
 import { clearSessionToken, logout } from "../services/api";
+import AnalyticsPanel from "./AnalyticsPanel";
+import ReportsPanel from "./ReportsPanel";
 import SummaryPanel from "./SummaryPanel";
 import SchedulePanel from "./SchedulePanel";
 import PlannerPanel from "./PlannerPanel";
 import SettingsModal from "./SettingsModal";
 
-type Tab = "summary" | "planner" | "schedule";
+type Tab = "summary" | "planner" | "reports" | "schedule" | "analytics";
 
 interface Props {
   profile: UserProfile | null;
@@ -15,9 +17,23 @@ interface Props {
   onSettingsChanged: () => void;
 }
 
+function getInitialTab(googleConfigured: boolean): { tab: Tab; summaryMode?: "emails" | "calendar" } {
+  const saved = localStorage.getItem("daybrief_default_tab");
+  if (saved === "summary-emails" && googleConfigured) return { tab: "summary", summaryMode: "emails" };
+  if (saved === "summary-calendar" && googleConfigured) return { tab: "summary", summaryMode: "calendar" };
+  if (saved === "reports" && googleConfigured) return { tab: "reports" };
+  if (saved === "schedule" && googleConfigured) return { tab: "schedule" };
+  if (saved === "analytics" && googleConfigured) return { tab: "analytics" };
+  if (saved === "planner") return { tab: "planner" };
+  if (saved === "summary" && googleConfigured) return { tab: "summary" };
+  return { tab: googleConfigured ? "summary" : "planner" };
+}
+
 export default function Dashboard({ profile, googleConfigured, onSettingsChanged }: Props) {
   const [showSettings, setShowSettings] = useState(false);
-  const [tab, setTab] = useState<Tab>(googleConfigured ? "summary" : "planner");
+  const initial = getInitialTab(googleConfigured);
+  const [tab, setTab] = useState<Tab>(initial.tab);
+  const [defaultSummaryMode] = useState(initial.summaryMode);
   const [settingsRev, setSettingsRev] = useState(0);
 
   const handleLogout = async () => {
@@ -31,7 +47,9 @@ export default function Dashboard({ profile, googleConfigured, onSettingsChanged
   const tabs: { key: Tab; label: string; disabled: boolean }[] = [
     { key: "summary", label: "Summary", disabled: !googleConfigured },
     { key: "planner", label: "Planner", disabled: false },
+    { key: "reports", label: "Reports", disabled: !googleConfigured },
     { key: "schedule", label: "Scheduled Jobs", disabled: !googleConfigured },
+    { key: "analytics", label: "Analytics", disabled: !googleConfigured },
   ];
 
   return (
@@ -43,8 +61,16 @@ export default function Dashboard({ profile, googleConfigured, onSettingsChanged
             {profile && <p className="text-xs text-slate-500">{profile.email}</p>}
           </div>
           <div className="flex items-center gap-2">
-            {profile?.picture && (
-              <img src={profile.picture} alt="" className="w-8 h-8 rounded-full" />
+            {profile && (
+              profile.picture ? (
+                <img
+                  src={profile.picture}
+                  alt=""
+                  className="w-8 h-8 rounded-full"
+                  referrerPolicy="no-referrer"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                />
+              ) : null
             )}
             <button
               onClick={() => setShowSettings(true)}
@@ -101,9 +127,11 @@ export default function Dashboard({ profile, googleConfigured, onSettingsChanged
             to add your Google credentials and enable email/calendar summaries.
           </div>
         )}
-        {tab === "summary" && <SummaryPanel />}
+        {tab === "summary" && <SummaryPanel defaultMode={defaultSummaryMode} />}
         {tab === "planner" && <PlannerPanel settingsRev={settingsRev} />}
+        {tab === "reports" && <ReportsPanel />}
         {tab === "schedule" && <SchedulePanel />}
+        {tab === "analytics" && <AnalyticsPanel />}
       </main>
 
       {showSettings && (

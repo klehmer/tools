@@ -11,12 +11,21 @@ from pydantic import BaseModel
 
 load_dotenv()
 
-import auth
 import config_manager
+
+# Decode multiline env vars that load_dotenv read as raw escaped strings
+for _f in config_manager._MULTILINE_FIELDS:
+    _raw = os.getenv(_f, "")
+    if _raw:
+        os.environ[_f] = config_manager._decode_multiline(_f, _raw)
+
+import auth
 import scheduler
 from google_service import GoogleService
 from summarizer import summarize_emails, summarize_events
+import analytics
 import checklist
+import slack_notifier
 
 
 @asynccontextmanager
@@ -76,6 +85,10 @@ class ConfigUpdate(BaseModel):
     DEFAULT_PERIOD: Optional[str] = None
     DEFAULT_DIRECTION: Optional[str] = None
     PLANNER_COLUMN_WIDTH: Optional[str] = None
+    DEFAULT_TAB: Optional[str] = None
+    EMAIL_PROMPT_RULES: Optional[str] = None
+    CALENDAR_PROMPT_RULES: Optional[str] = None
+    SLACK_WEBHOOK_URL: Optional[str] = None
     BACKEND_URL: Optional[str] = None
     FRONTEND_URL: Optional[str] = None
 
@@ -138,7 +151,7 @@ def email_summary(
 @app.get("/summary/calendar")
 def calendar_summary(
     period: str = Query("week", pattern="^(day|week|month|quarter)$"),
-    direction: str = Query("future", pattern="^(past|future)$"),
+    direction: str = Query("future", pattern="^(past|current|future)$"),
     g: GoogleService = Depends(get_google),
 ):
     events = g.fetch_events(period=period, direction=direction)
@@ -147,6 +160,27 @@ def calendar_summary(
     result["period"] = period
     result["direction"] = direction
     return result
+
+
+# ---- Slack ----
+class SlackSendRequest(BaseModel):
+    summary: dict
+    mode: str  # "emails" or "calendar"
+    period: str
+    direction: Optional[str] = None
+
+
+@app.post("/slack/send")
+def slack_send(body: SlackSendRequest):
+    webhook_url = os.getenv("SLACK_WEBHOOK_URL", "")
+    if not webhook_url:
+        raise HTTPException(status_code=400, detail="Slack webhook URL not configured. Add it in Settings.")
+    payload = slack_notifier.format_summary_for_slack(
+        body.summary, body.mode, body.period, body.direction,
+    )
+    if not slack_notifier.send_to_slack(webhook_url, payload):
+        raise HTTPException(status_code=502, detail="Failed to send to Slack. Check your webhook URL.")
+    return {"ok": True}
 
 
 # ---- Scheduled Jobs ----
@@ -205,10 +239,65 @@ def get_report(report_id: str):
     return report
 
 
+class SaveReportRequest(BaseModel):
+    name: str
+    results: dict
+
+
+@app.post("/reports")
+def save_report(body: SaveReportRequest):
+    return scheduler.save_adhoc_report(body.name, body.results)
+
+
 @app.delete("/reports/{report_id}")
 def delete_report(report_id: str):
     if not scheduler.delete_report(report_id):
         raise HTTPException(status_code=404, detail="Report not found")
+    return {"ok": True}
+
+
+# ---- Analytics ----
+class AnalyticsRequest(BaseModel):
+    report_ids: list[str]
+
+
+@app.post("/analytics")
+def generate_analytics(body: AnalyticsRequest):
+    reports = [scheduler.get_report(rid) for rid in body.report_ids]
+    reports = [r for r in reports if r is not None]
+    if not reports:
+        raise HTTPException(status_code=400, detail="No valid reports selected")
+    return analytics.generate(reports)
+
+
+class SaveAnalyticsRequest(BaseModel):
+    name: str
+    analytics: dict
+    source_report_ids: list[str]
+
+
+@app.post("/analytics/reports")
+def save_analytics_report(body: SaveAnalyticsRequest):
+    return scheduler.save_analytics_report(body.name, body.analytics, body.source_report_ids)
+
+
+@app.get("/analytics/reports")
+def list_analytics_reports():
+    return scheduler.get_analytics_reports()
+
+
+@app.get("/analytics/reports/{report_id}")
+def get_analytics_report(report_id: str):
+    report = scheduler.get_analytics_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Analytics report not found")
+    return report
+
+
+@app.delete("/analytics/reports/{report_id}")
+def delete_analytics_report(report_id: str):
+    if not scheduler.delete_analytics_report(report_id):
+        raise HTTPException(status_code=404, detail="Analytics report not found")
     return {"ok": True}
 
 
@@ -218,6 +307,7 @@ class ChecklistCreate(BaseModel):
     date: str  # YYYY-MM-DD
     sort_order: int = 0
     priority: bool = False
+    private: bool = False
 
 
 class ChecklistUpdate(BaseModel):
@@ -226,6 +316,7 @@ class ChecklistUpdate(BaseModel):
     done: Optional[bool] = None
     sort_order: Optional[int] = None
     priority: Optional[bool] = None
+    private: Optional[bool] = None
 
 
 class ChecklistReorder(BaseModel):
@@ -246,6 +337,7 @@ def create_checklist_item(body: ChecklistCreate):
     return checklist.create_item(
         text=body.text, item_date=body.date,
         sort_order=body.sort_order, priority=body.priority,
+        private=body.private,
     )
 
 

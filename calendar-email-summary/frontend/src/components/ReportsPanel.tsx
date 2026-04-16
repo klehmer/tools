@@ -27,7 +27,7 @@ export default function ReportsPanel() {
 
         {reports.length === 0 ? (
           <p className="text-slate-500 text-sm py-4 text-center">
-            No reports yet. Reports are generated when scheduled jobs run.
+            No reports yet. Save ad-hoc summaries or set up scheduled jobs.
           </p>
         ) : (
           <div className="space-y-2">
@@ -38,7 +38,14 @@ export default function ReportsPanel() {
               >
                 <FileText size={18} className="text-indigo-500 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">{report.job_name}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium truncate">{report.job_name}</span>
+                    {report.job_id === "adhoc" && (
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 shrink-0">
+                        Ad-hoc
+                      </span>
+                    )}
+                  </div>
                   <div className="text-xs text-slate-500">
                     {new Date(report.created_at).toLocaleString()}
                     {report.results.email && " \u00b7 Emails"}

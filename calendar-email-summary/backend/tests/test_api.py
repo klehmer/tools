@@ -133,3 +133,118 @@ class TestSummaryRoutes:
     def test_calendar_summary_requires_auth(self, raw_client):
         resp = raw_client.get("/summary/calendar")
         assert resp.status_code == 401
+
+    @patch("main.summarize_events")
+    def test_calendar_summary_current_direction(self, mock_summarize, client, mock_google_service):
+        mock_summarize.return_value = {"summary": "Today is busy.", "highlights": []}
+        resp = client.get("/summary/calendar?period=day&direction=current", headers={"X-Session-Token": "valid"})
+        assert resp.status_code == 200
+        assert resp.json()["direction"] == "current"
+
+
+class TestSlackRoutes:
+    @patch("slack_notifier.send_to_slack", return_value=True)
+    def test_slack_send_success(self, mock_send, client, monkeypatch):
+        monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/T/B/x")
+        resp = client.post("/slack/send", json={
+            "summary": {"summary": "test", "count": 1},
+            "mode": "emails",
+            "period": "day",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+    def test_slack_send_no_webhook(self, client, monkeypatch):
+        monkeypatch.setenv("SLACK_WEBHOOK_URL", "")
+        resp = client.post("/slack/send", json={
+            "summary": {"summary": "test"},
+            "mode": "emails",
+            "period": "day",
+        })
+        assert resp.status_code == 400
+
+    @patch("slack_notifier.send_to_slack", return_value=False)
+    def test_slack_send_failure(self, mock_send, client, monkeypatch):
+        monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/T/B/x")
+        resp = client.post("/slack/send", json={
+            "summary": {"summary": "test"},
+            "mode": "emails",
+            "period": "day",
+        })
+        assert resp.status_code == 502
+
+
+class TestReportRoutes:
+    @patch("scheduler.save_adhoc_report")
+    def test_save_adhoc_report(self, mock_save, client):
+        mock_save.return_value = {
+            "id": "abc",
+            "job_id": "adhoc",
+            "job_name": "Test Report",
+            "created_at": "2026-04-16T12:00:00",
+            "results": {"email": {"summary": "test"}},
+        }
+        resp = client.post("/reports", json={
+            "name": "Test Report",
+            "results": {"email": {"summary": "test"}},
+        })
+        assert resp.status_code == 200
+        assert resp.json()["job_id"] == "adhoc"
+        mock_save.assert_called_once()
+
+
+class TestAnalyticsRoutes:
+    @patch("analytics.generate")
+    @patch("scheduler.get_report")
+    def test_generate_analytics(self, mock_get_report, mock_generate, client):
+        mock_get_report.return_value = {
+            "id": "r1",
+            "results": {"email": {"summary": "test"}},
+        }
+        mock_generate.return_value = {
+            "overall_summary": "Analysis complete.",
+            "cross_insights": [],
+        }
+        resp = client.post("/analytics", json={"report_ids": ["r1"]})
+        assert resp.status_code == 200
+        assert resp.json()["overall_summary"] == "Analysis complete."
+
+    @patch("scheduler.get_report", return_value=None)
+    def test_generate_analytics_no_valid_reports(self, mock_get, client):
+        resp = client.post("/analytics", json={"report_ids": ["bad-id"]})
+        assert resp.status_code == 400
+
+    @patch("scheduler.save_analytics_report")
+    def test_save_analytics_report(self, mock_save, client):
+        mock_save.return_value = {
+            "id": "a1",
+            "type": "analytics",
+            "name": "Weekly Analysis",
+            "analytics": {"overall_summary": "ok"},
+            "source_report_ids": ["r1"],
+            "created_at": "2026-04-16T12:00:00",
+        }
+        resp = client.post("/analytics/reports", json={
+            "name": "Weekly Analysis",
+            "analytics": {"overall_summary": "ok"},
+            "source_report_ids": ["r1"],
+        })
+        assert resp.status_code == 200
+        assert resp.json()["type"] == "analytics"
+
+    @patch("scheduler.get_analytics_reports")
+    def test_list_analytics_reports(self, mock_list, client):
+        mock_list.return_value = [{"id": "a1", "name": "test"}]
+        resp = client.get("/analytics/reports")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1
+
+    @patch("scheduler.delete_analytics_report", return_value=True)
+    def test_delete_analytics_report(self, mock_del, client):
+        resp = client.delete("/analytics/reports/a1")
+        assert resp.status_code == 200
+
+    @patch("scheduler.delete_analytics_report", return_value=False)
+    def test_delete_analytics_report_not_found(self, mock_del, client):
+        resp = client.delete("/analytics/reports/bad")
+        assert resp.status_code == 404

@@ -55,8 +55,12 @@ def _call_anthropic(prompt: str) -> str:
 
 
 def _call_claude_code(prompt: str) -> str:
+    model = _get_model()
+    cmd = ["claude", "-p", prompt, "--output-format", "text"]
+    if model:
+        cmd.extend(["--model", model])
     result = subprocess.run(
-        ["claude", "-p", prompt, "--output-format", "text"],
+        cmd,
         capture_output=True,
         text=True,
         timeout=120,
@@ -116,6 +120,8 @@ def summarize_emails(emails: list[dict], period: str) -> dict:
         {"from": e["from"], "subject": e["subject"], "date": e["date"], "snippet": e["snippet"]}
         for e in emails
     ]
+    user_rules = os.getenv("EMAIL_PROMPT_RULES", "").strip()
+    rules_block = f"\n\nADDITIONAL USER RULES (follow these strictly):\n{user_rules}\n" if user_rules else ""
     prompt = f"""You are an executive assistant. Summarize the user's emails from the previous {period}.
 
 Return a single JSON object with this shape:
@@ -129,7 +135,7 @@ Return a single JSON object with this shape:
 }}
 
 Identify the MOST IMPORTANT emails (action required, personal, time-sensitive, from real people).
-Skip routine newsletters/promotions unless notably important. Include up to 10 highlights.
+Skip routine newsletters/promotions unless notably important. Include up to 10 highlights.{rules_block}
 
 EMAILS ({len(compact)} total):
 {json.dumps(compact, indent=2)[:60000]}
@@ -141,7 +147,7 @@ Respond with ONLY the JSON object."""
 
 
 def summarize_events(events: list[dict], period: str, direction: str) -> dict:
-    when = "upcoming" if direction == "future" else "past"
+    when = "upcoming" if direction == "future" else "current" if direction == "current" else "past"
     if not events:
         return {"summary": f"No {when} events for the {period}.", "highlights": [], "items": []}
 
@@ -157,6 +163,8 @@ def summarize_events(events: list[dict], period: str, direction: str) -> dict:
         }
         for e in events
     ]
+    user_rules = os.getenv("CALENDAR_PROMPT_RULES", "").strip()
+    rules_block = f"\n\nADDITIONAL USER RULES (follow these strictly):\n{user_rules}\n" if user_rules else ""
     prompt = f"""You are an executive assistant. Summarize the user's {when} calendar over the {period}.
 
 Return a single JSON object:
@@ -171,7 +179,7 @@ Return a single JSON object:
 }}
 
 Highlight the most important meetings (external attendees, leadership, decisions, interviews, prep needed).
-Up to 10 highlights. Be concise.
+Up to 10 highlights. Be concise.{rules_block}
 
 EVENTS ({len(compact)} total):
 {json.dumps(compact, indent=2, default=str)[:60000]}

@@ -36,7 +36,7 @@ def list_items(
     return items
 
 
-def create_item(text: str, item_date: str, sort_order: int = 0, priority: bool = False) -> dict:
+def create_item(text: str, item_date: str, sort_order: int = 0, priority: bool = False, private: bool = False) -> dict:
     items = _read()
     item = {
         "id": uuid.uuid4().hex[:12],
@@ -44,6 +44,7 @@ def create_item(text: str, item_date: str, sort_order: int = 0, priority: bool =
         "date": item_date,
         "done": False,
         "priority": priority,
+        "private": private,
         "sort_order": sort_order,
         "created_at": datetime.utcnow().isoformat(),
     }
@@ -56,7 +57,7 @@ def update_item(item_id: str, updates: dict) -> Optional[dict]:
     items = _read()
     for item in items:
         if item["id"] == item_id:
-            for k in ("text", "date", "done", "sort_order", "priority"):
+            for k in ("text", "date", "done", "sort_order", "priority", "private"):
                 if k in updates and updates[k] is not None:
                     item[k] = updates[k]
             _write(items)

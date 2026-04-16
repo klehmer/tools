@@ -1,4 +1,7 @@
-import type { AppConfig, ChecklistItem, Direction, Period, Report, ScheduledJob, SummaryResult, UserProfile } from "../types";
+import type { AnalyticsResult, AppConfig, ChecklistItem, Direction, Period, Report, SavedAnalyticsReport, ScheduledJob, SummaryResult, UserProfile } from "../types";
+
+// Re-export SummaryResult for convenience
+export type { SummaryResult };
 
 const SESSION_KEY = "ces_session";
 
@@ -45,6 +48,12 @@ export const summarizeEmails = (period: Period) =>
 export const summarizeCalendar = (period: Period, direction: Direction) =>
   request<SummaryResult>(`/summary/calendar?period=${period}&direction=${direction}`);
 
+export const sendToSlack = (summary: SummaryResult, mode: string, period: string, direction?: string) =>
+  request<{ ok: boolean }>("/slack/send", {
+    method: "POST",
+    body: JSON.stringify({ summary, mode, period, direction }),
+  });
+
 // --- Scheduled Jobs ---
 export const getJobs = () => request<ScheduledJob[]>("/jobs");
 export const createJob = (data: Record<string, unknown>) =>
@@ -66,6 +75,24 @@ export const getReports = (jobId?: string, limit = 50) => {
 export const getReport = (id: string) => request<Report>(`/reports/${id}`);
 export const deleteReport = (id: string) =>
   request<{ ok: boolean }>(`/reports/${id}`, { method: "DELETE" });
+export const saveReport = (name: string, results: Record<string, SummaryResult>) =>
+  request<Report>("/reports", { method: "POST", body: JSON.stringify({ name, results }) });
+
+// --- Analytics ---
+export const generateAnalytics = (reportIds: string[]) =>
+  request<AnalyticsResult>("/analytics", {
+    method: "POST",
+    body: JSON.stringify({ report_ids: reportIds }),
+  });
+export const saveAnalyticsReport = (name: string, analyticsData: AnalyticsResult, sourceReportIds: string[]) =>
+  request<SavedAnalyticsReport>("/analytics/reports", {
+    method: "POST",
+    body: JSON.stringify({ name, analytics: analyticsData, source_report_ids: sourceReportIds }),
+  });
+export const getAnalyticsReports = () =>
+  request<SavedAnalyticsReport[]>("/analytics/reports");
+export const deleteAnalyticsReport = (id: string) =>
+  request<{ ok: boolean }>(`/analytics/reports/${id}`, { method: "DELETE" });
 
 // --- Checklist / Planner ---
 export const getChecklist = (dateFrom?: string, dateTo?: string, done?: boolean) => {
@@ -75,12 +102,12 @@ export const getChecklist = (dateFrom?: string, dateTo?: string, done?: boolean)
   if (done !== undefined) params.set("done", String(done));
   return request<ChecklistItem[]>(`/checklist?${params}`);
 };
-export const createChecklistItem = (text: string, date: string, sort_order = 0, priority = false) =>
+export const createChecklistItem = (text: string, date: string, sort_order = 0, priority = false, isPrivate = false) =>
   request<ChecklistItem>("/checklist", {
     method: "POST",
-    body: JSON.stringify({ text, date, sort_order, priority }),
+    body: JSON.stringify({ text, date, sort_order, priority, private: isPrivate }),
   });
-export const updateChecklistItem = (id: string, data: Partial<Pick<ChecklistItem, "text" | "date" | "done" | "sort_order" | "priority">>) =>
+export const updateChecklistItem = (id: string, data: Partial<Pick<ChecklistItem, "text" | "date" | "done" | "sort_order" | "priority" | "private">>) =>
   request<ChecklistItem>(`/checklist/${id}`, {
     method: "PUT",
     body: JSON.stringify(data),

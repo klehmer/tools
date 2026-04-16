@@ -1,5 +1,5 @@
 export type Period = "day" | "week" | "month" | "quarter";
-export type Direction = "past" | "future";
+export type Direction = "past" | "current" | "future";
 export type AIProvider = "anthropic" | "claude-code" | "codex" | "openai";
 
 export interface ConfigField {
@@ -17,6 +17,10 @@ export interface AppConfig {
   DEFAULT_PERIOD: ConfigField;
   DEFAULT_DIRECTION: ConfigField;
   PLANNER_COLUMN_WIDTH: ConfigField;
+  DEFAULT_TAB: ConfigField;
+  EMAIL_PROMPT_RULES: ConfigField;
+  CALENDAR_PROMPT_RULES: ConfigField;
+  SLACK_WEBHOOK_URL: ConfigField;
   BACKEND_URL: ConfigField;
   FRONTEND_URL: ConfigField;
 }
@@ -62,7 +66,7 @@ export interface JobSchedule {
 export interface JobTask {
   type: "email" | "calendar";
   period: Period;
-  direction?: Direction;   // only for calendar
+  direction?: Direction;    // only for calendar
 }
 
 export interface JobNotification {
@@ -77,6 +81,8 @@ export interface ScheduledJob {
   schedule: JobSchedule;
   tasks: JobTask[];
   notification: JobNotification;
+  run_missed: boolean;
+  send_to_slack: boolean;
   session_token: string;
   created_at: string;
   last_run: string | null;
@@ -95,6 +101,37 @@ export interface Report {
   };
 }
 
+// --- Analytics ---
+
+export interface AnalyticsResult {
+  calendar_analytics?: {
+    hours_by_category: { category: string; hours: number }[];
+    busiest_days: { day: string; event_count: number; hours: number }[];
+    recurring_patterns: string[];
+    top_attendees: { name: string; meeting_count: number }[];
+    meeting_load?: { total_events: number; total_hours: number; avg_per_day: number };
+    summary: string;
+  };
+  email_analytics?: {
+    top_senders: { sender: string; count: number }[];
+    categories: { category: string; pct: number }[];
+    response_needed: string[];
+    volume_trend: { period: string; count: number }[];
+    summary: string;
+  };
+  cross_insights: string[];
+  overall_summary: string;
+}
+
+export interface SavedAnalyticsReport {
+  id: string;
+  type: "analytics";
+  name: string;
+  analytics: AnalyticsResult;
+  source_report_ids: string[];
+  created_at: string;
+}
+
 // --- Checklist / Planner ---
 
 export interface ChecklistItem {
@@ -103,6 +140,7 @@ export interface ChecklistItem {
   date: string; // YYYY-MM-DD
   done: boolean;
   priority: boolean;
+  private: boolean;
   sort_order: number;
   created_at: string;
 }

@@ -1,6 +1,6 @@
 """Tests for google_service module."""
-from datetime import timedelta
-from unittest.mock import MagicMock, patch
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -203,6 +203,186 @@ class TestFetchEvents:
 
         svc = GoogleService(creds)
         assert svc.fetch_events("day", "past") == []
+
+    @patch("google_service.build")
+    def test_current_day_uses_local_midnight_boundaries(self, mock_build):
+        creds = MagicMock(expired=False)
+        cal_mock = MagicMock()
+        cal_mock.events.return_value.list.return_value.execute.return_value = {"items": []}
+        mock_build.side_effect = [MagicMock(), cal_mock]
+
+        svc = GoogleService(creds)
+        svc.fetch_events("day", "current")
+
+        call_kwargs = cal_mock.events.return_value.list.return_value.execute.call_args
+        list_call = cal_mock.events.return_value.list.call_args
+        time_min = list_call.kwargs["timeMin"]
+        time_max = list_call.kwargs["timeMax"]
+        # Should be midnight-to-midnight boundaries (T00:00:00)
+        assert "T00:00:00" in time_min
+
+    @patch("google_service.build")
+    def test_current_week_spans_monday_to_sunday(self, mock_build):
+        creds = MagicMock(expired=False)
+        cal_mock = MagicMock()
+        cal_mock.events.return_value.list.return_value.execute.return_value = {"items": []}
+        mock_build.side_effect = [MagicMock(), cal_mock]
+
+        svc = GoogleService(creds)
+        svc.fetch_events("week", "current")
+
+        list_call = cal_mock.events.return_value.list.call_args
+        time_min = list_call.kwargs["timeMin"]
+        time_max = list_call.kwargs["timeMax"]
+        # Parse the dates and check they span 7 days
+        min_dt = datetime.fromisoformat(time_min)
+        max_dt = datetime.fromisoformat(time_max)
+        assert (max_dt - min_dt).days == 7
+        assert min_dt.weekday() == 0  # Monday
+
+    @patch("google_service.build")
+    def test_past_day_is_yesterday(self, mock_build):
+        creds = MagicMock(expired=False)
+        cal_mock = MagicMock()
+        cal_mock.events.return_value.list.return_value.execute.return_value = {"items": []}
+        mock_build.side_effect = [MagicMock(), cal_mock]
+
+        svc = GoogleService(creds)
+        svc.fetch_events("day", "past")
+
+        list_call = cal_mock.events.return_value.list.call_args
+        time_min = list_call.kwargs["timeMin"]
+        time_max = list_call.kwargs["timeMax"]
+        min_dt = datetime.fromisoformat(time_min)
+        max_dt = datetime.fromisoformat(time_max)
+        assert (max_dt - min_dt).days == 1
+        assert "T00:00:00" in time_min
+        assert "T00:00:00" in time_max
+
+    @patch("google_service.build")
+    def test_future_day_is_tomorrow(self, mock_build):
+        creds = MagicMock(expired=False)
+        cal_mock = MagicMock()
+        cal_mock.events.return_value.list.return_value.execute.return_value = {"items": []}
+        mock_build.side_effect = [MagicMock(), cal_mock]
+
+        svc = GoogleService(creds)
+        svc.fetch_events("day", "future")
+
+        list_call = cal_mock.events.return_value.list.call_args
+        time_min = list_call.kwargs["timeMin"]
+        time_max = list_call.kwargs["timeMax"]
+        min_dt = datetime.fromisoformat(time_min)
+        max_dt = datetime.fromisoformat(time_max)
+        assert (max_dt - min_dt).days == 1
+        # tomorrow starts after today
+        local_now = datetime.now().astimezone()
+        today_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        assert min_dt >= today_start + timedelta(days=1) - timedelta(seconds=1)
+
+    @patch("google_service.build")
+    def test_current_month_boundaries(self, mock_build):
+        creds = MagicMock(expired=False)
+        cal_mock = MagicMock()
+        cal_mock.events.return_value.list.return_value.execute.return_value = {"items": []}
+        mock_build.side_effect = [MagicMock(), cal_mock]
+
+        svc = GoogleService(creds)
+        svc.fetch_events("month", "current")
+
+        list_call = cal_mock.events.return_value.list.call_args
+        min_dt = datetime.fromisoformat(list_call.kwargs["timeMin"])
+        max_dt = datetime.fromisoformat(list_call.kwargs["timeMax"])
+        assert min_dt.day == 1
+        assert max_dt.day == 1
+        # Next month
+        if min_dt.month == 12:
+            assert max_dt.month == 1
+        else:
+            assert max_dt.month == min_dt.month + 1
+
+    @patch("google_service.build")
+    def test_current_quarter_boundaries(self, mock_build):
+        creds = MagicMock(expired=False)
+        cal_mock = MagicMock()
+        cal_mock.events.return_value.list.return_value.execute.return_value = {"items": []}
+        mock_build.side_effect = [MagicMock(), cal_mock]
+
+        svc = GoogleService(creds)
+        svc.fetch_events("quarter", "current")
+
+        list_call = cal_mock.events.return_value.list.call_args
+        min_dt = datetime.fromisoformat(list_call.kwargs["timeMin"])
+        max_dt = datetime.fromisoformat(list_call.kwargs["timeMax"])
+        assert min_dt.day == 1
+        assert min_dt.month in (1, 4, 7, 10)
+        # Quarter spans ~90 days
+        assert 89 <= (max_dt - min_dt).days <= 92
+
+    @patch("google_service.build")
+    def test_past_week_boundaries(self, mock_build):
+        creds = MagicMock(expired=False)
+        cal_mock = MagicMock()
+        cal_mock.events.return_value.list.return_value.execute.return_value = {"items": []}
+        mock_build.side_effect = [MagicMock(), cal_mock]
+
+        svc = GoogleService(creds)
+        svc.fetch_events("week", "past")
+
+        list_call = cal_mock.events.return_value.list.call_args
+        min_dt = datetime.fromisoformat(list_call.kwargs["timeMin"])
+        max_dt = datetime.fromisoformat(list_call.kwargs["timeMax"])
+        assert (max_dt - min_dt).days == 7
+        assert min_dt.weekday() == 0  # Monday
+        assert max_dt.weekday() == 0  # Monday
+
+    @patch("google_service.build")
+    def test_future_week_boundaries(self, mock_build):
+        creds = MagicMock(expired=False)
+        cal_mock = MagicMock()
+        cal_mock.events.return_value.list.return_value.execute.return_value = {"items": []}
+        mock_build.side_effect = [MagicMock(), cal_mock]
+
+        svc = GoogleService(creds)
+        svc.fetch_events("week", "future")
+
+        list_call = cal_mock.events.return_value.list.call_args
+        min_dt = datetime.fromisoformat(list_call.kwargs["timeMin"])
+        max_dt = datetime.fromisoformat(list_call.kwargs["timeMax"])
+        assert (max_dt - min_dt).days == 7
+        assert min_dt.weekday() == 0  # Monday
+
+    @patch("google_service.build")
+    def test_past_month_boundaries(self, mock_build):
+        creds = MagicMock(expired=False)
+        cal_mock = MagicMock()
+        cal_mock.events.return_value.list.return_value.execute.return_value = {"items": []}
+        mock_build.side_effect = [MagicMock(), cal_mock]
+
+        svc = GoogleService(creds)
+        svc.fetch_events("month", "past")
+
+        list_call = cal_mock.events.return_value.list.call_args
+        min_dt = datetime.fromisoformat(list_call.kwargs["timeMin"])
+        max_dt = datetime.fromisoformat(list_call.kwargs["timeMax"])
+        assert min_dt.day == 1
+        assert max_dt.day == 1
+
+    @patch("google_service.build")
+    def test_future_month_boundaries(self, mock_build):
+        creds = MagicMock(expired=False)
+        cal_mock = MagicMock()
+        cal_mock.events.return_value.list.return_value.execute.return_value = {"items": []}
+        mock_build.side_effect = [MagicMock(), cal_mock]
+
+        svc = GoogleService(creds)
+        svc.fetch_events("month", "future")
+
+        list_call = cal_mock.events.return_value.list.call_args
+        min_dt = datetime.fromisoformat(list_call.kwargs["timeMin"])
+        max_dt = datetime.fromisoformat(list_call.kwargs["timeMax"])
+        assert min_dt.day == 1
+        assert max_dt.day == 1
 
     @patch("google_service.build")
     def test_truncates_long_descriptions(self, mock_build):

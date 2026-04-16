@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  EyeOff,
   GripVertical,
   Star,
   Trash2,
@@ -69,6 +71,8 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
   const [dragItem, setDragItem] = useState<ChecklistItem | null>(null);
   const [dropTarget, setDropTarget] = useState<{ date: string; index: number } | null>(null);
   const [columnWidth, setColumnWidth] = useState(220);
+  const [privateOpen, setPrivateOpen] = useState<Record<string, boolean>>({});
+  const [addingPrivate, setAddingPrivate] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const todayRef = useRef<HTMLDivElement>(null);
@@ -112,14 +116,17 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
   };
 
   const dayItems = (date: string) =>
-    items.filter((i) => i.date === date).sort((a, b) => a.sort_order - b.sort_order);
+    items.filter((i) => i.date === date && !i.private).sort((a, b) => a.sort_order - b.sort_order);
+
+  const dayPrivateItems = (date: string) =>
+    items.filter((i) => i.date === date && i.private).sort((a, b) => a.sort_order - b.sort_order);
 
   // ---- Add items (Enter keeps input open) ----
   const handleAdd = async (date: string) => {
     const text = newText.trim();
     if (!text) return;
-    const existing = dayItems(date);
-    const created = await createChecklistItem(text, date, existing.length);
+    const existing = addingPrivate ? dayPrivateItems(date) : dayItems(date);
+    const created = await createChecklistItem(text, date, existing.length, false, addingPrivate);
     setItems((prev) => [...prev, created]);
     setNewText("");
     // keep input open for rapid entry
@@ -150,6 +157,12 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
   const handleDelete = async (id: string) => {
     setItems((prev) => prev.filter((i) => i.id !== id));
     await deleteChecklistItem(id);
+  };
+
+  const handlePrivateToggle = async (item: ChecklistItem) => {
+    const next = !item.private;
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, private: next } : i)));
+    await updateChecklistItem(item.id, { private: next });
   };
 
   const handleEditSave = async (item: ChecklistItem) => {
@@ -380,6 +393,13 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
                             </div>
                             <div className="flex items-center gap-0.5 flex-shrink-0">
                               <button
+                                onClick={() => handlePrivateToggle(item)}
+                                className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-300 hover:text-slate-600 transition-all"
+                                title="Move to private"
+                              >
+                                <EyeOff size={14} />
+                              </button>
+                              <button
                                 onClick={() => handlePriority(item)}
                                 className={`p-0.5 transition-colors ${
                                   item.priority
@@ -412,9 +432,141 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
                     )}
                 </div>
 
+                {/* Private items accordion */}
+                {(() => {
+                  const pItems = dayPrivateItems(ds);
+                  if (pItems.length === 0 && activeInput !== ds) return null;
+                  const isOpen = privateOpen[ds] ?? false;
+                  return (
+                    <div className="mt-2 pt-2 border-t border-dashed border-slate-200">
+                      <button
+                        onClick={() => setPrivateOpen((prev) => ({ ...prev, [ds]: !isOpen }))}
+                        className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-600 font-medium uppercase tracking-wider w-full"
+                      >
+                        <ChevronDown
+                          size={12}
+                          className={`transition-transform ${isOpen ? "" : "-rotate-90"}`}
+                        />
+                        <EyeOff size={11} />
+                        Private{pItems.length > 0 && ` (${pItems.length})`}
+                      </button>
+                      {isOpen && (
+                        <div className="mt-2 space-y-2">
+                          {pItems.map((item, idx) => {
+                            const color = itemColor(item, idx);
+                            return (
+                              <div
+                                key={item.id}
+                                draggable
+                                onDragStart={(e) => onDragStart(e, item)}
+                                onDragEnd={onDragEnd}
+                                className={`group rounded-lg border px-2.5 py-2 cursor-grab active:cursor-grabbing transition-all ${
+                                  item.done
+                                    ? "bg-slate-50 border-slate-200 opacity-60"
+                                    : `${color.bg} ${color.border}`
+                                } ${
+                                  dragItem?.id === item.id ? "opacity-30 scale-95" : ""
+                                }`}
+                              >
+                                <div className="flex items-start gap-2">
+                                  <GripVertical
+                                    size={14}
+                                    className="mt-0.5 text-slate-300 group-hover:text-slate-500 flex-shrink-0"
+                                  />
+                                  <input
+                                    type="checkbox"
+                                    checked={item.done}
+                                    onChange={() => handleToggle(item)}
+                                    className="mt-1 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer flex-shrink-0"
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    {editingId === item.id ? (
+                                      <input
+                                        type="text"
+                                        value={editText}
+                                        onChange={(e) => setEditText(e.target.value)}
+                                        onBlur={() => handleEditSave(item)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter") handleEditSave(item);
+                                          if (e.key === "Escape") setEditingId(null);
+                                        }}
+                                        autoFocus
+                                        className="w-full text-sm font-medium border-b-2 border-indigo-400 outline-none bg-transparent"
+                                      />
+                                    ) : (
+                                      <span
+                                        className={`text-sm font-medium leading-snug block ${
+                                          item.done
+                                            ? "line-through text-slate-400"
+                                            : color.text
+                                        }`}
+                                        onDoubleClick={() => {
+                                          setEditingId(item.id);
+                                          setEditText(item.text);
+                                        }}
+                                      >
+                                        {item.text}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-0.5 flex-shrink-0">
+                                    <button
+                                      onClick={() => handlePrivateToggle(item)}
+                                      className="p-0.5 text-slate-400 hover:text-slate-600 transition-colors"
+                                      title="Move to visible"
+                                    >
+                                      <EyeOff size={14} />
+                                    </button>
+                                    <button
+                                      onClick={() => handlePriority(item)}
+                                      className={`p-0.5 transition-colors ${
+                                        item.priority
+                                          ? "text-amber-500"
+                                          : "opacity-0 group-hover:opacity-100 text-slate-300 hover:text-amber-500"
+                                      }`}
+                                      title="Toggle priority"
+                                    >
+                                      <Star size={14} fill={item.priority ? "currentColor" : "none"} />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDelete(item.id)}
+                                      className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-300 hover:text-red-500 transition-all"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* Always-visible input area */}
                 {activeInput === ds ? (
                   <div className="mt-3 pt-2 border-t border-slate-100">
+                    <div className="flex items-center gap-2 mb-2">
+                      <button
+                        onClick={() => setAddingPrivate(false)}
+                        className={`text-[11px] font-medium px-2 py-0.5 rounded ${
+                          !addingPrivate ? "bg-indigo-100 text-indigo-700" : "text-slate-400 hover:text-slate-600"
+                        }`}
+                      >
+                        Visible
+                      </button>
+                      <button
+                        onClick={() => setAddingPrivate(true)}
+                        className={`text-[11px] font-medium px-2 py-0.5 rounded flex items-center gap-1 ${
+                          addingPrivate ? "bg-slate-200 text-slate-700" : "text-slate-400 hover:text-slate-600"
+                        }`}
+                      >
+                        <EyeOff size={10} />
+                        Private
+                      </button>
+                    </div>
                     <input
                       ref={inputRef}
                       type="text"
@@ -431,8 +583,12 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
                         if (!newText.trim()) stopAdding();
                       }}
                       autoFocus
-                      placeholder="Type and press Enter..."
-                      className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+                      placeholder={addingPrivate ? "Private item..." : "Type and press Enter..."}
+                      className={`w-full text-sm border rounded-lg px-3 py-2 outline-none focus:ring-1 ${
+                        addingPrivate
+                          ? "border-slate-400 focus:border-slate-500 focus:ring-slate-200"
+                          : "border-slate-300 focus:border-indigo-400 focus:ring-indigo-200"
+                      }`}
                     />
                     <p className="text-[11px] text-slate-400 mt-1">
                       Enter to add, Esc to close
@@ -440,7 +596,7 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
                   </div>
                 ) : (
                   <button
-                    onClick={() => startAdding(ds)}
+                    onClick={() => { setAddingPrivate(false); startAdding(ds); }}
                     className="mt-3 w-full py-2 text-sm text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg border border-dashed border-slate-200 hover:border-indigo-300 transition-colors"
                   >
                     + Add item

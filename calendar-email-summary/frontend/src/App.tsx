@@ -4,6 +4,7 @@ import Dashboard from "./components/Dashboard";
 import SettingsModal from "./components/SettingsModal";
 import {
   clearSessionToken,
+  getConfig,
   getConfigStatus,
   getMe,
   getSessionToken,
@@ -42,6 +43,12 @@ export default function App() {
         return;
       }
       setGoogleConfigured(status.google_configured);
+
+      // Sync DEFAULT_TAB to localStorage
+      getConfig().then((cfg) => {
+        const tab = cfg.DEFAULT_TAB?.value;
+        if (tab) localStorage.setItem("daybrief_default_tab", tab);
+      }).catch(() => {});
 
       // If Google isn't configured, skip login and go straight to dashboard
       // (only planner will be available)
