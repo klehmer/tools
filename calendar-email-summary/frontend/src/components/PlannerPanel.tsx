@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import {
+  AlertTriangle,
+  ArrowRight,
+  CalendarDays,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -55,9 +58,17 @@ const PRIORITY_COLOR = {
   text: "text-amber-900",
 };
 
-function itemColor(item: ChecklistItem, index: number) {
+function hashCode(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+function itemColor(item: ChecklistItem) {
   if (item.priority) return PRIORITY_COLOR;
-  return COLORS[index % COLORS.length];
+  return COLORS[hashCode(item.id) % COLORS.length];
 }
 
 export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number }) {
@@ -73,6 +84,10 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
   const [columnWidth, setColumnWidth] = useState(220);
   const [privateOpen, setPrivateOpen] = useState<Record<string, boolean>>({});
   const [addingPrivate, setAddingPrivate] = useState(false);
+  const [overdueItems, setOverdueItems] = useState<ChecklistItem[]>([]);
+  const [overdueOpen, setOverdueOpen] = useState(true);
+  const [movePickerItem, setMovePickerItem] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const todayRef = useRef<HTMLDivElement>(null);
@@ -96,6 +111,19 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
     if (activeInput && inputRef.current) inputRef.current.focus();
   }, [activeInput]);
 
+  // Close date picker on outside click
+  useEffect(() => {
+    if (!movePickerItem) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-date-picker]") && target.tagName !== "INPUT") {
+        setMovePickerItem(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [movePickerItem]);
+
   useEffect(() => {
     if (!loading && scrollRef.current && todayRef.current) {
       const container = scrollRef.current;
@@ -113,6 +141,23 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
       setItems([]);
     }
     setLoading(false);
+  };
+
+  // Fetch overdue (incomplete) items from before the visible week
+  useEffect(() => {
+    fetchOverdue();
+  }, [weekStart]);
+
+  const fetchOverdue = async () => {
+    try {
+      const cutoff = fmt(weekDates[0]); // start of visible week
+      // Fetch up to 90 days back for incomplete items
+      const lookback = fmt(addDays(weekDates[0], -90));
+      const past = await getChecklist(lookback, fmt(addDays(weekDates[0], -1)), false);
+      setOverdueItems(past.filter((i) => !i.done));
+    } catch {
+      setOverdueItems([]);
+    }
   };
 
   const dayItems = (date: string) =>
@@ -176,6 +221,30 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
     await updateChecklistItem(item.id, { text });
   };
 
+  // ---- Move to date (for cross-week moves) ----
+  const handleMoveToDate = async (item: ChecklistItem, newDate: string) => {
+    if (newDate === item.date) return;
+    // Update locally
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, date: newDate } : i)));
+    setOverdueItems((prev) => prev.filter((i) => i.id !== item.id));
+    setMovePickerItem(null);
+    await updateChecklistItem(item.id, { date: newDate, sort_order: 0 });
+    // Refresh both lists
+    fetchItems();
+    fetchOverdue();
+  };
+
+  const handleMoveAllToToday = async () => {
+    const todayStr = fmt(new Date());
+    const moves = overdueItems.map((item) =>
+      updateChecklistItem(item.id, { date: todayStr, sort_order: 0 })
+    );
+    setOverdueItems([]);
+    await Promise.all(moves);
+    fetchItems();
+    fetchOverdue();
+  };
+
   // ---- Drag & Drop ----
   const onDragStart = (e: DragEvent, item: ChecklistItem) => {
     setDragItem(item);
@@ -201,6 +270,12 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
     if (!dragItem) return;
 
     const movedToDifferentDay = dragItem.date !== targetDate;
+    const isFromOverdue = overdueItems.some((i) => i.id === dragItem.id);
+
+    // Remove from overdue list if it came from there
+    if (isFromOverdue) {
+      setOverdueItems((prev) => prev.filter((i) => i.id !== dragItem.id));
+    }
 
     // Build new items list
     let updated = items.filter((i) => i.id !== dragItem.id);
@@ -228,7 +303,7 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
     setDropTarget(null);
 
     // Persist
-    if (movedToDifferentDay) {
+    if (movedToDifferentDay || isFromOverdue) {
       await updateChecklistItem(movedItem.id, { date: targetDate, sort_order: targetIndex });
     }
     await reorderChecklist(reorderedIds);
@@ -238,6 +313,54 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
     setDragItem(null);
     setDropTarget(null);
   };
+
+  // ---- Keyboard reorder (select item, then arrow up/down to move) ----
+  const handleKeyboardReorder = async (direction: "up" | "down") => {
+    if (!selectedId) return;
+    const selected = items.find((i) => i.id === selectedId);
+    if (!selected) return;
+
+    const isPrivate = selected.private;
+    const siblings = items
+      .filter((i) => i.date === selected.date && i.private === isPrivate)
+      .sort((a, b) => a.sort_order - b.sort_order);
+
+    const currentIdx = siblings.findIndex((i) => i.id === selectedId);
+    if (currentIdx < 0) return;
+
+    const swapIdx = direction === "up" ? currentIdx - 1 : currentIdx + 1;
+    if (swapIdx < 0 || swapIdx >= siblings.length) return;
+
+    // Swap sort_order values
+    const swapItem = siblings[swapIdx];
+    const newItems = items.map((i) => {
+      if (i.id === selected.id) return { ...i, sort_order: swapItem.sort_order };
+      if (i.id === swapItem.id) return { ...i, sort_order: selected.sort_order };
+      return i;
+    });
+    setItems(newItems);
+
+    // Persist: reorder the full list for that day/section
+    const reordered = newItems
+      .filter((i) => i.date === selected.date && i.private === isPrivate)
+      .sort((a, b) => a.sort_order - b.sort_order);
+    await reorderChecklist(reordered.map((i) => i.id));
+  };
+
+  useEffect(() => {
+    if (!selectedId || editingId) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        e.preventDefault();
+        handleKeyboardReorder(e.key === "ArrowUp" ? "up" : "down");
+      }
+      if (e.key === "Escape") {
+        setSelectedId(null);
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [selectedId, editingId, items]);
 
   // ---- Navigation ----
   const today = fmt(new Date());
@@ -272,6 +395,112 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
         </div>
         <h2 className="text-xl font-bold text-slate-800">{weekLabel}</h2>
       </div>
+
+      {/* Overdue items banner */}
+      {overdueItems.length > 0 && (
+        <div className="rounded-xl border-2 border-amber-300 bg-amber-50/80 p-4">
+          <div className="flex items-center justify-between mb-2">
+            <button
+              onClick={() => setOverdueOpen(!overdueOpen)}
+              className="flex items-center gap-2 text-sm font-semibold text-amber-800"
+            >
+              <AlertTriangle size={16} className="text-amber-500" />
+              <ChevronDown
+                size={14}
+                className={`transition-transform ${overdueOpen ? "" : "-rotate-90"}`}
+              />
+              {overdueItems.length} overdue item{overdueItems.length !== 1 ? "s" : ""} from previous weeks
+            </button>
+            <button
+              onClick={handleMoveAllToToday}
+              className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-amber-200 hover:bg-amber-300 text-amber-900 transition-colors"
+            >
+              <ArrowRight size={12} />
+              Move all to today
+            </button>
+          </div>
+          {overdueOpen && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {overdueItems.map((item, idx) => {
+                const color = itemColor(item);
+                return (
+                  <div
+                    key={item.id}
+                    draggable
+                    onDragStart={(e) => onDragStart(e, item)}
+                    onDragEnd={onDragEnd}
+                    className={`group relative flex items-center gap-2 rounded-lg border px-3 py-2 cursor-grab active:cursor-grabbing transition-all max-w-xs ${
+                      item.done
+                        ? "bg-slate-50 border-slate-200 opacity-60"
+                        : `${color.bg} ${color.border}`
+                    } ${dragItem?.id === item.id ? "opacity-30 scale-95" : ""}`}
+                  >
+                    <GripVertical
+                      size={14}
+                      className="text-slate-300 group-hover:text-slate-500 flex-shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <span className={`text-sm font-medium block truncate ${color.text}`}>
+                        {item.text}
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {new Date(item.date + "T00:00").toLocaleDateString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {/* Move to specific date */}
+                      <div className="relative">
+                        <button
+                          onClick={() =>
+                            setMovePickerItem(movePickerItem === item.id ? null : item.id)
+                          }
+                          className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
+                          title="Move to date..."
+                        >
+                          <CalendarDays size={14} />
+                        </button>
+                        {movePickerItem === item.id && (
+                          <div data-date-picker className="absolute top-full right-0 mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg p-2">
+                            <input
+                              type="date"
+                              defaultValue={item.date}
+                              onChange={(e) => {
+                                if (e.target.value) handleMoveToDate(item, e.target.value);
+                              }}
+                              className="text-sm border border-slate-200 rounded px-2 py-1"
+                              autoFocus
+                            />
+                          </div>
+                        )}
+                      </div>
+                      {/* Quick move to today */}
+                      <button
+                        onClick={() => handleMoveToDate(item, fmt(new Date()))}
+                        className="p-1 text-slate-400 hover:text-emerald-600 transition-colors"
+                        title="Move to today"
+                      >
+                        <ArrowRight size={14} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setOverdueItems((prev) => prev.filter((i) => i.id !== item.id));
+                          handleDelete(item.id);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-red-500 transition-all"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {loading ? (
         <p className="text-slate-500">Loading...</p>
@@ -324,7 +553,7 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
                 {/* Items */}
                 <div className="flex-1 space-y-2">
                   {dItems.map((item, idx) => {
-                    const color = itemColor(item, idx);
+                    const color = itemColor(item);
                     const isDropBefore =
                       dropTarget?.date === ds && dropTarget?.index === idx && dragItem?.id !== item.id;
 
@@ -342,12 +571,15 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
                             e.stopPropagation();
                             onDrop(e, ds, idx);
                           }}
+                          onClick={() => setSelectedId(selectedId === item.id ? null : item.id)}
                           className={`group rounded-lg border px-2.5 py-2 cursor-grab active:cursor-grabbing transition-all ${
                             item.done
                               ? "bg-slate-50 border-slate-200 opacity-60"
                               : `${color.bg} ${color.border}`
                           } ${
                             dragItem?.id === item.id ? "opacity-30 scale-95" : ""
+                          } ${
+                            selectedId === item.id ? "ring-2 ring-indigo-500 ring-offset-1" : ""
                           }`}
                         >
                           <div className="flex items-start gap-2">
@@ -392,6 +624,31 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
                               )}
                             </div>
                             <div className="flex items-center gap-0.5 flex-shrink-0">
+                              {/* Move to different date */}
+                              <div className="relative">
+                                <button
+                                  onClick={() =>
+                                    setMovePickerItem(movePickerItem === item.id ? null : item.id)
+                                  }
+                                  className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-300 hover:text-indigo-600 transition-all"
+                                  title="Move to date..."
+                                >
+                                  <CalendarDays size={14} />
+                                </button>
+                                {movePickerItem === item.id && (
+                                  <div data-date-picker className="absolute top-full right-0 mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg p-2">
+                                    <input
+                                      type="date"
+                                      defaultValue={item.date}
+                                      onChange={(e) => {
+                                        if (e.target.value) handleMoveToDate(item, e.target.value);
+                                      }}
+                                      className="text-sm border border-slate-200 rounded px-2 py-1"
+                                      autoFocus
+                                    />
+                                  </div>
+                                )}
+                              </div>
                               <button
                                 onClick={() => handlePrivateToggle(item)}
                                 className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-300 hover:text-slate-600 transition-all"
@@ -453,19 +710,22 @@ export default function PlannerPanel({ settingsRev = 0 }: { settingsRev?: number
                       {isOpen && (
                         <div className="mt-2 space-y-2">
                           {pItems.map((item, idx) => {
-                            const color = itemColor(item, idx);
+                            const color = itemColor(item);
                             return (
                               <div
                                 key={item.id}
                                 draggable
                                 onDragStart={(e) => onDragStart(e, item)}
                                 onDragEnd={onDragEnd}
+                                onClick={() => setSelectedId(selectedId === item.id ? null : item.id)}
                                 className={`group rounded-lg border px-2.5 py-2 cursor-grab active:cursor-grabbing transition-all ${
                                   item.done
                                     ? "bg-slate-50 border-slate-200 opacity-60"
                                     : `${color.bg} ${color.border}`
                                 } ${
                                   dragItem?.id === item.id ? "opacity-30 scale-95" : ""
+                                } ${
+                                  selectedId === item.id ? "ring-2 ring-indigo-500 ring-offset-1" : ""
                                 }`}
                               >
                                 <div className="flex items-start gap-2">

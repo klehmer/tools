@@ -52,6 +52,28 @@ class TestGetChecklist:
         assert pending.json()[0]["done"] is False
 
 
+    def test_filter_date_range_and_done(self, client):
+        """Combined filter used by the overdue-items feature."""
+        a = client.post("/checklist", json={"text": "Done old", "date": "2026-04-08"}).json()
+        client.put(f"/checklist/{a['id']}", json={"done": True})
+        client.post("/checklist", json={"text": "Pending old", "date": "2026-04-09"})
+        client.post("/checklist", json={"text": "Pending current", "date": "2026-04-15"})
+
+        resp = client.get("/checklist?date_from=2026-04-01&date_to=2026-04-13&done=false")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1
+        assert resp.json()[0]["text"] == "Pending old"
+
+    def test_filter_date_range_and_done_returns_empty(self, client):
+        """No overdue items when everything is complete."""
+        a = client.post("/checklist", json={"text": "Done", "date": "2026-04-08"}).json()
+        client.put(f"/checklist/{a['id']}", json={"done": True})
+
+        resp = client.get("/checklist?date_from=2026-04-01&date_to=2026-04-13&done=false")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+
 class TestCreateChecklist:
     def test_create_minimal(self, client):
         resp = client.post("/checklist", json={"text": "Buy milk", "date": "2026-04-14"})
@@ -112,6 +134,15 @@ class TestUpdateChecklist:
         resp = client.put(f"/checklist/{item['id']}", json={"sort_order": 5})
         assert resp.status_code == 200
         assert resp.json()["sort_order"] == 5
+
+    def test_update_date_and_sort_order(self, client):
+        """Cross-week move: update date and sort_order in one call."""
+        item = client.post("/checklist", json={"text": "Move me", "date": "2026-04-08", "sort_order": 3}).json()
+        resp = client.put(f"/checklist/{item['id']}", json={"date": "2026-04-20", "sort_order": 0})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["date"] == "2026-04-20"
+        assert data["sort_order"] == 0
 
     def test_update_nonexistent(self, client):
         resp = client.put("/checklist/nonexistent", json={"text": "X"})

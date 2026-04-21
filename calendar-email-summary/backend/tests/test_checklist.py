@@ -101,6 +101,18 @@ class TestListItems:
         assert len(items) == 1
         assert items[0]["text"] == "Pending"
 
+    def test_filter_by_date_range_and_done(self):
+        """Combined filter used by the overdue-items feature."""
+        a = checklist.create_item("Done old", "2026-04-08")
+        checklist.update_item(a["id"], {"done": True})
+        checklist.create_item("Pending old", "2026-04-09")
+        checklist.create_item("Pending current", "2026-04-15")
+
+        # Only incomplete items in the past date range
+        items = checklist.list_items(date_from="2026-04-01", date_to="2026-04-13", done=False)
+        assert len(items) == 1
+        assert items[0]["text"] == "Pending old"
+
     def test_empty_list(self):
         assert checklist.list_items() == []
 
