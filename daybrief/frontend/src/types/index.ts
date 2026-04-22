@@ -144,3 +144,23 @@ export interface ChecklistItem {
   sort_order: number;
   created_at: string;
 }
+
+// --- Notes ---
+
+export interface Note {
+  id: string;
+  title: string;
+  content: string;
+  archived: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// --- Links / Bookmarks ---
+
+export interface Link {
+  id: string;
+  url: string;
+  title: string;
+  created_at: string;
+}

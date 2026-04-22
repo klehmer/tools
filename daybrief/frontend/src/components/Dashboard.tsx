@@ -7,9 +7,11 @@ import ReportsPanel from "./ReportsPanel";
 import SummaryPanel from "./SummaryPanel";
 import SchedulePanel from "./SchedulePanel";
 import PlannerPanel from "./PlannerPanel";
+import NotesPanel from "./NotesPanel";
+import LinksPanel from "./LinksPanel";
 import SettingsModal from "./SettingsModal";
 
-type Tab = "summary" | "planner" | "reports" | "schedule" | "analytics";
+type Tab = "summary" | "planner" | "notes" | "links" | "reports" | "schedule" | "analytics";
 
 interface Props {
   profile: UserProfile | null;
@@ -25,6 +27,8 @@ function getInitialTab(googleConfigured: boolean): { tab: Tab; summaryMode?: "em
   if (saved === "schedule" && googleConfigured) return { tab: "schedule" };
   if (saved === "analytics" && googleConfigured) return { tab: "analytics" };
   if (saved === "planner") return { tab: "planner" };
+  if (saved === "notes") return { tab: "notes" };
+  if (saved === "links") return { tab: "links" };
   if (saved === "summary" && googleConfigured) return { tab: "summary" };
   return { tab: googleConfigured ? "summary" : "planner" };
 }
@@ -47,6 +51,8 @@ export default function Dashboard({ profile, googleConfigured, onSettingsChanged
   const tabs: { key: Tab; label: string; disabled: boolean }[] = [
     { key: "summary", label: "Summary", disabled: !googleConfigured },
     { key: "planner", label: "Planner", disabled: false },
+    { key: "notes", label: "Notes", disabled: false },
+    { key: "links", label: "Links", disabled: false },
     { key: "reports", label: "Reports", disabled: !googleConfigured },
     { key: "schedule", label: "Scheduled Jobs", disabled: !googleConfigured },
     { key: "analytics", label: "Analytics", disabled: !googleConfigured },
@@ -129,6 +135,8 @@ export default function Dashboard({ profile, googleConfigured, onSettingsChanged
         )}
         {tab === "summary" && <SummaryPanel defaultMode={defaultSummaryMode} />}
         {tab === "planner" && <PlannerPanel settingsRev={settingsRev} />}
+        {tab === "notes" && <NotesPanel />}
+        {tab === "links" && <LinksPanel />}
         {tab === "reports" && <ReportsPanel />}
         {tab === "schedule" && <SchedulePanel />}
         {tab === "analytics" && <AnalyticsPanel />}

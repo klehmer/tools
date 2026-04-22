@@ -1,4 +1,4 @@
-import type { AnalyticsResult, AppConfig, ChecklistItem, Direction, Period, Report, SavedAnalyticsReport, ScheduledJob, SummaryResult, UserProfile } from "../types";
+import type { AnalyticsResult, AppConfig, ChecklistItem, Direction, Link, Note, Period, Report, SavedAnalyticsReport, ScheduledJob, SummaryResult, UserProfile } from "../types";
 
 // Re-export SummaryResult for convenience
 export type { SummaryResult };
@@ -119,3 +119,26 @@ export const reorderChecklist = (itemIds: string[]) =>
   });
 export const deleteChecklistItem = (id: string) =>
   request<{ ok: boolean }>(`/checklist/${id}`, { method: "DELETE" });
+
+// --- Notes ---
+export const getNotes = (archived?: boolean) => {
+  const params = new URLSearchParams();
+  if (archived !== undefined) params.set("archived", String(archived));
+  return request<Note[]>(`/notes?${params}`);
+};
+export const getNote = (id: string) => request<Note>(`/notes/${id}`);
+export const createNote = (title: string, content: string = "") =>
+  request<Note>("/notes", { method: "POST", body: JSON.stringify({ title, content }) });
+export const updateNote = (id: string, data: Partial<Pick<Note, "title" | "content" | "archived">>) =>
+  request<Note>(`/notes/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteNote = (id: string) =>
+  request<{ ok: boolean }>(`/notes/${id}`, { method: "DELETE" });
+
+// --- Links / Bookmarks ---
+export const getLinks = () => request<Link[]>("/links");
+export const createLink = (url: string, title: string = "") =>
+  request<Link>("/links", { method: "POST", body: JSON.stringify({ url, title }) });
+export const updateLink = (id: string, data: Partial<Pick<Link, "url" | "title">>) =>
+  request<Link>(`/links/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteLink = (id: string) =>
+  request<{ ok: boolean }>(`/links/${id}`, { method: "DELETE" });

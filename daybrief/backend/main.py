@@ -25,6 +25,8 @@ from google_service import GoogleService
 from summarizer import summarize_emails, summarize_events
 import analytics
 import checklist
+import notes
+import links
 import slack_notifier
 
 
@@ -358,4 +360,85 @@ def reorder_checklist(body: ChecklistReorder):
 def delete_checklist_item(item_id: str):
     if not checklist.delete_item(item_id):
         raise HTTPException(status_code=404, detail="Item not found")
+    return {"ok": True}
+
+
+# ---- Notes ----
+class NoteCreate(BaseModel):
+    title: str
+    content: str = ""
+
+
+class NoteUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    archived: Optional[bool] = None
+
+
+@app.get("/notes")
+def get_notes(archived: Optional[bool] = None):
+    return notes.list_notes(archived=archived)
+
+
+@app.get("/notes/{note_id}")
+def get_note(note_id: str):
+    note = notes.get_note(note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return note
+
+
+@app.post("/notes")
+def create_note(body: NoteCreate):
+    return notes.create_note(title=body.title, content=body.content)
+
+
+@app.put("/notes/{note_id}")
+def update_note(note_id: str, body: NoteUpdate):
+    note = notes.update_note(note_id, body.model_dump())
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return note
+
+
+@app.delete("/notes/{note_id}")
+def delete_note(note_id: str):
+    if not notes.delete_note(note_id):
+        raise HTTPException(status_code=404, detail="Note not found")
+    return {"ok": True}
+
+
+# ---- Links / Bookmarks ----
+class LinkCreate(BaseModel):
+    url: str
+    title: str = ""
+
+
+class LinkUpdate(BaseModel):
+    url: Optional[str] = None
+    title: Optional[str] = None
+
+
+@app.get("/links")
+def get_links():
+    return links.list_links()
+
+
+@app.post("/links")
+def create_link(body: LinkCreate):
+    return links.create_link(url=body.url, title=body.title)
+
+
+@app.put("/links/{link_id}")
+def update_link(link_id: str, body: LinkUpdate):
+    link = links.update_link(link_id, body.model_dump())
+    if not link:
+        raise HTTPException(status_code=404, detail="Link not found")
+    return link
+
+
+@app.delete("/links/{link_id}")
+def delete_link(link_id: str):
+    if not links.delete_link(link_id):
+        raise HTTPException(status_code=404, detail="Link not found")
     return {"ok": True}
