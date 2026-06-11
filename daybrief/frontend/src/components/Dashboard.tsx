@@ -9,9 +9,10 @@ import SchedulePanel from "./SchedulePanel";
 import PlannerPanel from "./PlannerPanel";
 import NotesPanel from "./NotesPanel";
 import LinksPanel from "./LinksPanel";
+import AppsPanel from "./AppsPanel";
 import SettingsModal from "./SettingsModal";
 
-type Tab = "summary" | "planner" | "notes" | "links" | "reports" | "schedule" | "analytics";
+type Tab = "summary" | "planner" | "notes" | "links" | "apps" | "reports" | "schedule" | "analytics";
 
 interface Props {
   profile: UserProfile | null;
@@ -29,6 +30,7 @@ function getInitialTab(googleConfigured: boolean): { tab: Tab; summaryMode?: "em
   if (saved === "planner") return { tab: "planner" };
   if (saved === "notes") return { tab: "notes" };
   if (saved === "links") return { tab: "links" };
+  if (saved === "apps") return { tab: "apps" };
   if (saved === "summary" && googleConfigured) return { tab: "summary" };
   return { tab: googleConfigured ? "summary" : "planner" };
 }
@@ -53,6 +55,7 @@ export default function Dashboard({ profile, googleConfigured, onSettingsChanged
     { key: "planner", label: "Planner", disabled: false },
     { key: "notes", label: "Notes", disabled: false },
     { key: "links", label: "Links", disabled: false },
+    { key: "apps", label: "Apps", disabled: false },
     { key: "reports", label: "Reports", disabled: !googleConfigured },
     { key: "schedule", label: "Scheduled Jobs", disabled: !googleConfigured },
     { key: "analytics", label: "Analytics", disabled: !googleConfigured },
@@ -137,6 +140,7 @@ export default function Dashboard({ profile, googleConfigured, onSettingsChanged
         {tab === "planner" && <PlannerPanel settingsRev={settingsRev} />}
         {tab === "notes" && <NotesPanel />}
         {tab === "links" && <LinksPanel />}
+        {tab === "apps" && <AppsPanel />}
         {tab === "reports" && <ReportsPanel />}
         {tab === "schedule" && <SchedulePanel />}
         {tab === "analytics" && <AnalyticsPanel />}

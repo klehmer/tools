@@ -14,6 +14,8 @@ export default defineConfig({
       "/checklist": "http://localhost:8001",
       "/notes": "http://localhost:8001",
       "/links": "http://localhost:8001",
+      "/apps": "http://localhost:8001",
+      "/browse": "http://localhost:8001",
       "/slack": "http://localhost:8001",
       "/analytics": "http://localhost:8001",
     },

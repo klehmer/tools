@@ -27,6 +27,7 @@ import analytics
 import checklist
 import notes
 import links
+import app_launcher
 import slack_notifier
 
 
@@ -441,4 +442,105 @@ def update_link(link_id: str, body: LinkUpdate):
 def delete_link(link_id: str):
     if not links.delete_link(link_id):
         raise HTTPException(status_code=404, detail="Link not found")
+    return {"ok": True}
+
+
+# ---- File Browser (for app launcher) ----
+@app.get("/browse")
+def browse_directory(path: str = Query("~")):
+    """List directory contents for the file browser UI."""
+    resolved = os.path.expanduser(path)
+    if not os.path.isdir(resolved):
+        # If it's a file, browse its parent
+        resolved = os.path.dirname(resolved)
+    if not os.path.isdir(resolved):
+        raise HTTPException(status_code=400, detail="Invalid directory")
+
+    try:
+        entries = []
+        for name in sorted(os.listdir(resolved)):
+            if name.startswith("."):
+                continue  # skip hidden by default
+            full = os.path.join(resolved, name)
+            entries.append({
+                "name": name,
+                "path": full,
+                "is_dir": os.path.isdir(full),
+            })
+        return {
+            "current": resolved,
+            "parent": os.path.dirname(resolved),
+            "entries": entries,
+        }
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+
+# ---- App Launcher ----
+class AppCreate(BaseModel):
+    name: str
+    start_script: str
+    stop_script: str = ""
+    url: str = ""
+    working_dir: str = ""
+
+
+class AppUpdate(BaseModel):
+    name: Optional[str] = None
+    start_script: Optional[str] = None
+    stop_script: Optional[str] = None
+    url: Optional[str] = None
+    working_dir: Optional[str] = None
+
+
+@app.get("/apps")
+def get_apps():
+    return app_launcher.list_apps()
+
+
+@app.get("/apps/{app_id}")
+def get_app_detail(app_id: str):
+    a = app_launcher.get_app(app_id)
+    if not a:
+        raise HTTPException(status_code=404, detail="App not found")
+    return a
+
+
+@app.post("/apps")
+def create_app(body: AppCreate):
+    return app_launcher.create_app(
+        name=body.name, start_script=body.start_script,
+        stop_script=body.stop_script, url=body.url,
+        working_dir=body.working_dir,
+    )
+
+
+@app.put("/apps/{app_id}")
+def update_app_config(app_id: str, body: AppUpdate):
+    a = app_launcher.update_app(app_id, body.model_dump())
+    if not a:
+        raise HTTPException(status_code=404, detail="App not found")
+    return a
+
+
+@app.post("/apps/{app_id}/start")
+def start_app(app_id: str):
+    a = app_launcher.start_app(app_id)
+    if not a:
+        raise HTTPException(status_code=404, detail="App not found or no start script")
+    return a
+
+
+@app.post("/apps/{app_id}/stop")
+def stop_app(app_id: str):
+    a = app_launcher.stop_app(app_id)
+    if not a:
+        raise HTTPException(status_code=404, detail="App not found")
+    return a
+
+
+@app.delete("/apps/{app_id}")
+def delete_app(app_id: str):
+    if not app_launcher.delete_app(app_id):
+        raise HTTPException(status_code=404, detail="App not found")
     return {"ok": True}

@@ -164,3 +164,16 @@ export interface Link {
   title: string;
   created_at: string;
 }
+
+// --- App Launcher ---
+
+export interface AppConfig {
+  id: string;
+  name: string;
+  start_script: string;
+  stop_script: string;
+  url: string;
+  working_dir: string;
+  running: boolean;
+  created_at: string;
+}

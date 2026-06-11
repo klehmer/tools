@@ -142,3 +142,28 @@ export const updateLink = (id: string, data: Partial<Pick<Link, "url" | "title">
   request<Link>(`/links/${id}`, { method: "PUT", body: JSON.stringify(data) });
 export const deleteLink = (id: string) =>
   request<{ ok: boolean }>(`/links/${id}`, { method: "DELETE" });
+
+// --- File Browser ---
+export interface BrowseResult {
+  current: string;
+  parent: string;
+  entries: { name: string; path: string; is_dir: boolean }[];
+}
+export const browseDirectory = (path: string = "~") => {
+  const params = new URLSearchParams({ path });
+  return request<BrowseResult>(`/browse?${params}`);
+};
+
+// --- App Launcher ---
+export const getApps = () => request<AppConfig[]>("/apps");
+export const getApp = (id: string) => request<AppConfig>(`/apps/${id}`);
+export const createApp = (data: { name: string; start_script: string; stop_script?: string; url?: string; working_dir?: string }) =>
+  request<AppConfig>("/apps", { method: "POST", body: JSON.stringify(data) });
+export const updateApp = (id: string, data: Partial<Pick<AppConfig, "name" | "start_script" | "stop_script" | "url" | "working_dir">>) =>
+  request<AppConfig>(`/apps/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const startApp = (id: string) =>
+  request<AppConfig>(`/apps/${id}/start`, { method: "POST" });
+export const stopApp = (id: string) =>
+  request<AppConfig>(`/apps/${id}/stop`, { method: "POST" });
+export const deleteApp = (id: string) =>
+  request<{ ok: boolean }>(`/apps/${id}`, { method: "DELETE" });
