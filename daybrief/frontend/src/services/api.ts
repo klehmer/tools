@@ -4,6 +4,7 @@ import type { AnalyticsResult, AppConfig, ChecklistItem, Direction, Link, Note, 
 export type { SummaryResult };
 
 const SESSION_KEY = "ces_session";
+const SKIP_AUTH_KEY = "daybrief_skip_google";
 
 export function getSessionToken(): string | null {
   return localStorage.getItem(SESSION_KEY);
@@ -13,6 +14,15 @@ export function setSessionToken(token: string) {
 }
 export function clearSessionToken() {
   localStorage.removeItem(SESSION_KEY);
+}
+
+// Set when the user opts to use the app without signing in to Google.
+export function getSkipGoogleAuth(): boolean {
+  return localStorage.getItem(SKIP_AUTH_KEY) === "1";
+}
+export function setSkipGoogleAuth(skip: boolean) {
+  if (skip) localStorage.setItem(SKIP_AUTH_KEY, "1");
+  else localStorage.removeItem(SKIP_AUTH_KEY);
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {

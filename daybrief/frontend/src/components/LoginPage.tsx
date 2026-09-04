@@ -1,7 +1,12 @@
 import { Calendar, Mail } from "lucide-react";
 import { getAuthUrl } from "../services/api";
 
-export default function LoginPage({ error }: { error?: string | null }) {
+interface Props {
+  error?: string | null;
+  onSkip: () => void;
+}
+
+export default function LoginPage({ error, onSkip }: Props) {
   const handleLogin = async () => {
     const { url } = await getAuthUrl();
     window.location.href = url;
@@ -26,12 +31,24 @@ export default function LoginPage({ error }: { error?: string | null }) {
           <li>• Look ahead at upcoming meetings</li>
           <li>• Spot themes and action items</li>
         </ul>
-        <button
-          onClick={handleLogin}
-          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-lg transition"
-        >
-          Sign in with Google
-        </button>
+        <div className="space-y-3">
+          <button
+            onClick={handleLogin}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-lg transition"
+          >
+            Sign in with Google
+          </button>
+          <button
+            onClick={onSkip}
+            className="w-full border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium py-3 rounded-lg transition"
+          >
+            Continue without Google
+          </button>
+          <p className="text-xs text-slate-500 text-center">
+            Planner, Notes, Links, and Apps stay available. Email and calendar
+            features will be disabled until you sign in.
+          </p>
+        </div>
         {error && <p className="text-red-600 text-sm text-center">{error}</p>}
       </div>
     </div>

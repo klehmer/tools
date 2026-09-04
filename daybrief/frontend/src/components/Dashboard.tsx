@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LogOut, Settings } from "lucide-react";
+import { AlertTriangle, LogOut, Settings } from "lucide-react";
 import type { UserProfile } from "../types";
 import { clearSessionToken, logout } from "../services/api";
 import AnalyticsPanel from "./AnalyticsPanel";
@@ -17,27 +17,38 @@ type Tab = "summary" | "planner" | "notes" | "links" | "apps" | "reports" | "sch
 interface Props {
   profile: UserProfile | null;
   googleConfigured: boolean;
+  googleAuthed: boolean;
+  onSignIn: () => void;
   onSettingsChanged: () => void;
 }
 
-function getInitialTab(googleConfigured: boolean): { tab: Tab; summaryMode?: "emails" | "calendar" } {
+function getInitialTab(googleEnabled: boolean): { tab: Tab; summaryMode?: "emails" | "calendar" } {
   const saved = localStorage.getItem("daybrief_default_tab");
-  if (saved === "summary-emails" && googleConfigured) return { tab: "summary", summaryMode: "emails" };
-  if (saved === "summary-calendar" && googleConfigured) return { tab: "summary", summaryMode: "calendar" };
-  if (saved === "reports" && googleConfigured) return { tab: "reports" };
-  if (saved === "schedule" && googleConfigured) return { tab: "schedule" };
-  if (saved === "analytics" && googleConfigured) return { tab: "analytics" };
+  if (saved === "summary-emails" && googleEnabled) return { tab: "summary", summaryMode: "emails" };
+  if (saved === "summary-calendar" && googleEnabled) return { tab: "summary", summaryMode: "calendar" };
+  if (saved === "reports" && googleEnabled) return { tab: "reports" };
+  if (saved === "schedule" && googleEnabled) return { tab: "schedule" };
+  if (saved === "analytics" && googleEnabled) return { tab: "analytics" };
   if (saved === "planner") return { tab: "planner" };
   if (saved === "notes") return { tab: "notes" };
   if (saved === "links") return { tab: "links" };
   if (saved === "apps") return { tab: "apps" };
-  if (saved === "summary" && googleConfigured) return { tab: "summary" };
-  return { tab: googleConfigured ? "summary" : "planner" };
+  if (saved === "summary" && googleEnabled) return { tab: "summary" };
+  return { tab: googleEnabled ? "summary" : "planner" };
 }
 
-export default function Dashboard({ profile, googleConfigured, onSettingsChanged }: Props) {
+export default function Dashboard({
+  profile,
+  googleConfigured,
+  googleAuthed,
+  onSignIn,
+  onSettingsChanged,
+}: Props) {
   const [showSettings, setShowSettings] = useState(false);
-  const initial = getInitialTab(googleConfigured);
+  // Google-backed tabs need both credentials on the server and a signed-in user.
+  const googleEnabled = googleConfigured && googleAuthed;
+  const notAuthed = googleConfigured && !googleAuthed;
+  const initial = getInitialTab(googleEnabled);
   const [tab, setTab] = useState<Tab>(initial.tab);
   const [defaultSummaryMode] = useState(initial.summaryMode);
   const [settingsRev, setSettingsRev] = useState(0);
@@ -51,15 +62,19 @@ export default function Dashboard({ profile, googleConfigured, onSettingsChanged
   };
 
   const tabs: { key: Tab; label: string; disabled: boolean }[] = [
-    { key: "summary", label: "Summary", disabled: !googleConfigured },
+    { key: "summary", label: "Summary", disabled: !googleEnabled },
     { key: "planner", label: "Planner", disabled: false },
     { key: "notes", label: "Notes", disabled: false },
     { key: "links", label: "Links", disabled: false },
     { key: "apps", label: "Apps", disabled: false },
-    { key: "reports", label: "Reports", disabled: !googleConfigured },
-    { key: "schedule", label: "Scheduled Jobs", disabled: !googleConfigured },
-    { key: "analytics", label: "Analytics", disabled: !googleConfigured },
+    { key: "reports", label: "Reports", disabled: !googleEnabled },
+    { key: "schedule", label: "Scheduled Jobs", disabled: !googleEnabled },
+    { key: "analytics", label: "Analytics", disabled: !googleEnabled },
   ];
+
+  const disabledTabTitle = notAuthed
+    ? "Not authenticated to Google — sign in to enable email and calendar features"
+    : "Add Google OAuth credentials in Settings to enable";
 
   return (
     <div className="min-h-screen">
@@ -67,9 +82,21 @@ export default function Dashboard({ profile, googleConfigured, onSettingsChanged
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold">DayBrief</h1>
-            {profile && <p className="text-xs text-slate-500">{profile.email}</p>}
+            {profile ? (
+              <p className="text-xs text-slate-500">{profile.email}</p>
+            ) : notAuthed ? (
+              <p className="text-xs text-amber-700">Not signed in to Google</p>
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
+            {notAuthed && (
+              <button
+                onClick={onSignIn}
+                className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
+              >
+                Sign in with Google
+              </button>
+            )}
             {profile && (
               profile.picture ? (
                 <img
@@ -114,7 +141,7 @@ export default function Dashboard({ profile, googleConfigured, onSettingsChanged
                     ? "border-indigo-600 text-indigo-600"
                     : "border-transparent text-slate-500 hover:text-slate-700"
                 }`}
-                title={t.disabled ? "Add Google OAuth credentials in Settings to enable" : undefined}
+                title={t.disabled ? disabledTabTitle : undefined}
               >
                 {t.label}
               </button>
@@ -124,6 +151,22 @@ export default function Dashboard({ profile, googleConfigured, onSettingsChanged
       </header>
 
       <main className={`mx-auto px-6 py-8 ${tab === "planner" ? "max-w-full" : "max-w-5xl"}`}>
+        {notAuthed && (
+          <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800 flex items-start gap-2">
+            <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+            <span>
+              You are not authenticated to Google, so email and calendar features
+              (Summary, Reports, Scheduled Jobs, Analytics) are disabled. Planner,
+              Notes, Links, and Apps work normally.
+            </span>
+            <button
+              onClick={onSignIn}
+              className="ml-auto shrink-0 underline font-medium hover:text-amber-900"
+            >
+              Sign in
+            </button>
+          </div>
+        )}
         {!googleConfigured && tab === "planner" && (
           <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
             Google OAuth is not configured. Only the Planner is available.{" "}

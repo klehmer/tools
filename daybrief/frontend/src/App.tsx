@@ -8,7 +8,9 @@ import {
   getConfigStatus,
   getMe,
   getSessionToken,
+  getSkipGoogleAuth,
   setSessionToken,
+  setSkipGoogleAuth,
 } from "./services/api";
 import type { UserProfile } from "./types";
 
@@ -18,6 +20,7 @@ export default function App() {
   const [state, setState] = useState<State>("loading");
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [googleConfigured, setGoogleConfigured] = useState(false);
+  const [googleAuthed, setGoogleAuthed] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -53,25 +56,47 @@ export default function App() {
       // If Google isn't configured, skip login and go straight to dashboard
       // (only planner will be available)
       if (!status.google_configured) {
+        setGoogleAuthed(false);
         setState("app");
         return;
       }
 
       if (!getSessionToken()) {
-        setState("login");
+        setProfile(null);
+        setGoogleAuthed(false);
+        setState(getSkipGoogleAuth() ? "app" : "login");
         return;
       }
       try {
         const p = await getMe();
         setProfile(p);
+        setGoogleAuthed(true);
+        setSkipGoogleAuth(false);
         setState("app");
       } catch {
         clearSessionToken();
-        setState("login");
+        setProfile(null);
+        setGoogleAuthed(false);
+        setState(getSkipGoogleAuth() ? "app" : "login");
       }
     } catch (e) {
       setState("setup");
     }
+  };
+
+  // Use the app without Google — email/calendar features stay disabled.
+  const handleSkipAuth = () => {
+    setSkipGoogleAuth(true);
+    setProfile(null);
+    setGoogleAuthed(false);
+    setAuthError(null);
+    setState("app");
+  };
+
+  const handleSignIn = () => {
+    setSkipGoogleAuth(false);
+    setAuthError(null);
+    setState("login");
   };
 
   if (state === "loading") {
@@ -87,8 +112,16 @@ export default function App() {
   }
 
   if (state === "login") {
-    return <LoginPage error={authError} />;
+    return <LoginPage error={authError} onSkip={handleSkipAuth} />;
   }
 
-  return <Dashboard profile={profile} googleConfigured={googleConfigured} onSettingsChanged={bootstrap} />;
+  return (
+    <Dashboard
+      profile={profile}
+      googleConfigured={googleConfigured}
+      googleAuthed={googleAuthed}
+      onSignIn={handleSignIn}
+      onSettingsChanged={bootstrap}
+    />
+  );
 }
