@@ -8,7 +8,8 @@ FRONTEND_DIR="$ROOT/frontend"
 # Install dependencies if needed
 if [ ! -d "$BACKEND_DIR/.venv" ]; then
   echo "Creating backend virtual environment..."
-  python3 -m venv "$BACKEND_DIR/.venv"
+  PYTHON_BIN="$(command -v python3.12 || command -v python3)"
+  "$PYTHON_BIN" -m venv "$BACKEND_DIR/.venv"
 fi
 
 if ! "$BACKEND_DIR/.venv/bin/pip" show fastapi &>/dev/null; then

@@ -3,13 +3,14 @@ import json
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
+from typing import Optional
 
 
 def format_summary_for_slack(
     summary: dict,
     mode: str,
     period: str,
-    direction: str | None = None,
+    direction: Optional[str] = None,
 ) -> dict:
     """Build a Slack Block Kit payload from a summary result."""
     blocks: list[dict] = []
