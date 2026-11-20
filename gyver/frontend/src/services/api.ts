@@ -1,0 +1,212 @@
+import type { AgentDef, AgentRun, AgentRuntimes, AnalyticsResult, AppConfig, ChecklistItem, Direction, Link, Note, Period, Report, SavedAnalyticsReport, ScheduledJob, SummaryResult, UserProfile } from "../types";
+
+// Re-export SummaryResult for convenience
+export type { SummaryResult };
+
+const SESSION_KEY = "ces_session";
+const SKIP_AUTH_KEY = "gyver_skip_google";
+
+export function getSessionToken(): string | null {
+  return localStorage.getItem(SESSION_KEY);
+}
+export function setSessionToken(token: string) {
+  localStorage.setItem(SESSION_KEY, token);
+}
+export function clearSessionToken() {
+  localStorage.removeItem(SESSION_KEY);
+}
+
+// Set when the user opts to use the app without signing in to Google.
+export function getSkipGoogleAuth(): boolean {
+  return localStorage.getItem(SKIP_AUTH_KEY) === "1";
+}
+export function setSkipGoogleAuth(skip: boolean) {
+  if (skip) localStorage.setItem(SKIP_AUTH_KEY, "1");
+  else localStorage.removeItem(SKIP_AUTH_KEY);
+}
+
+export class ApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = getSessionToken();
+  const res = await fetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { "X-Session-Token": token } : {}),
+      ...(options.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new ApiError(err.detail ?? res.statusText, res.status);
+  }
+  return res.json() as Promise<T>;
+}
+
+export const getConfigStatus = () => request<{ configured: boolean; google_configured: boolean; ai_configured: boolean }>("/config/status");
+export const getConfig = () => request<AppConfig>("/config");
+export const saveConfig = (data: Record<string, string>) =>
+  request<{ ok: boolean }>("/config", { method: "POST", body: JSON.stringify(data) });
+
+export const getDefaults = () =>
+  request<{ period: string; direction: string; provider: string }>("/config/defaults");
+export const getAuthUrl = () => request<{ url: string }>("/auth/url");
+// Ask the backend for a session it already holds (stored Google grant, or the Claude-connector fallback).
+export const restoreSession = () =>
+  request<{ session_token: string; source: "google" | "claude_mcp" }>("/auth/restore");
+export const getMe = () => request<UserProfile>("/auth/me");
+export const logout = () => request<{ ok: boolean }>("/auth/logout", { method: "POST" });
+
+export const summarizeEmails = (period: Period) =>
+  request<SummaryResult>(`/summary/emails?period=${period}`);
+export const summarizeCalendar = (period: Period, direction: Direction) =>
+  request<SummaryResult>(`/summary/calendar?period=${period}&direction=${direction}`);
+
+export const sendToSlack = (summary: SummaryResult, mode: string, period: string, direction?: string) =>
+  request<{ ok: boolean }>("/slack/send", {
+    method: "POST",
+    body: JSON.stringify({ summary, mode, period, direction }),
+  });
+
+// --- Scheduled Jobs ---
+export const getJobs = () => request<ScheduledJob[]>("/jobs");
+export const createJob = (data: Record<string, unknown>) =>
+  request<ScheduledJob>("/jobs", { method: "POST", body: JSON.stringify(data) });
+export const updateJob = (id: string, data: Record<string, unknown>) =>
+  request<ScheduledJob>(`/jobs/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteJob = (id: string) =>
+  request<{ ok: boolean }>(`/jobs/${id}`, { method: "DELETE" });
+export const runJobNow = (id: string) =>
+  request<{ ok: boolean; message: string }>(`/jobs/${id}/run`, { method: "POST" });
+
+// --- Reports ---
+export const getReports = (jobId?: string, limit = 50) => {
+  const params = new URLSearchParams();
+  if (jobId) params.set("job_id", jobId);
+  params.set("limit", String(limit));
+  return request<Report[]>(`/reports?${params}`);
+};
+export const getReport = (id: string) => request<Report>(`/reports/${id}`);
+export const deleteReport = (id: string) =>
+  request<{ ok: boolean }>(`/reports/${id}`, { method: "DELETE" });
+export const saveReport = (name: string, results: Record<string, SummaryResult>) =>
+  request<Report>("/reports", { method: "POST", body: JSON.stringify({ name, results }) });
+
+// --- Analytics ---
+export const generateAnalytics = (reportIds: string[]) =>
+  request<AnalyticsResult>("/analytics", {
+    method: "POST",
+    body: JSON.stringify({ report_ids: reportIds }),
+  });
+export const saveAnalyticsReport = (name: string, analyticsData: AnalyticsResult, sourceReportIds: string[]) =>
+  request<SavedAnalyticsReport>("/analytics/reports", {
+    method: "POST",
+    body: JSON.stringify({ name, analytics: analyticsData, source_report_ids: sourceReportIds }),
+  });
+export const getAnalyticsReports = () =>
+  request<SavedAnalyticsReport[]>("/analytics/reports");
+export const deleteAnalyticsReport = (id: string) =>
+  request<{ ok: boolean }>(`/analytics/reports/${id}`, { method: "DELETE" });
+
+// --- Checklist / Planner ---
+export const getChecklist = (dateFrom?: string, dateTo?: string, done?: boolean) => {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("date_from", dateFrom);
+  if (dateTo) params.set("date_to", dateTo);
+  if (done !== undefined) params.set("done", String(done));
+  return request<ChecklistItem[]>(`/checklist?${params}`);
+};
+export const createChecklistItem = (text: string, date: string, sort_order = 0, priority = false, isPrivate = false) =>
+  request<ChecklistItem>("/checklist", {
+    method: "POST",
+    body: JSON.stringify({ text, date, sort_order, priority, private: isPrivate }),
+  });
+export const updateChecklistItem = (id: string, data: Partial<Pick<ChecklistItem, "text" | "date" | "done" | "sort_order" | "priority" | "private">>) =>
+  request<ChecklistItem>(`/checklist/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+export const reorderChecklist = (itemIds: string[]) =>
+  request<ChecklistItem[]>("/checklist/reorder", {
+    method: "POST",
+    body: JSON.stringify({ item_ids: itemIds }),
+  });
+export const deleteChecklistItem = (id: string) =>
+  request<{ ok: boolean }>(`/checklist/${id}`, { method: "DELETE" });
+
+// --- Notes ---
+export const getNotes = (archived?: boolean) => {
+  const params = new URLSearchParams();
+  if (archived !== undefined) params.set("archived", String(archived));
+  return request<Note[]>(`/notes?${params}`);
+};
+export const getNote = (id: string) => request<Note>(`/notes/${id}`);
+export const createNote = (title: string, content: string = "") =>
+  request<Note>("/notes", { method: "POST", body: JSON.stringify({ title, content }) });
+export const updateNote = (id: string, data: Partial<Pick<Note, "title" | "content" | "archived">>) =>
+  request<Note>(`/notes/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteNote = (id: string) =>
+  request<{ ok: boolean }>(`/notes/${id}`, { method: "DELETE" });
+
+// --- Links / Bookmarks ---
+export const getLinks = () => request<Link[]>("/links");
+export const createLink = (url: string, title: string = "") =>
+  request<Link>("/links", { method: "POST", body: JSON.stringify({ url, title }) });
+export const updateLink = (id: string, data: Partial<Pick<Link, "url" | "title">>) =>
+  request<Link>(`/links/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteLink = (id: string) =>
+  request<{ ok: boolean }>(`/links/${id}`, { method: "DELETE" });
+
+// --- File Browser ---
+export interface BrowseResult {
+  current: string;
+  parent: string;
+  entries: { name: string; path: string; is_dir: boolean }[];
+}
+export const browseDirectory = (path: string = "~") => {
+  const params = new URLSearchParams({ path });
+  return request<BrowseResult>(`/browse?${params}`);
+};
+
+// --- App Launcher ---
+export const getApps = () => request<AppConfig[]>("/apps");
+export const getApp = (id: string) => request<AppConfig>(`/apps/${id}`);
+export const createApp = (data: { name: string; start_script: string; stop_script?: string; url?: string; working_dir?: string }) =>
+  request<AppConfig>("/apps", { method: "POST", body: JSON.stringify(data) });
+export const updateApp = (id: string, data: Partial<Pick<AppConfig, "name" | "start_script" | "stop_script" | "url" | "working_dir">>) =>
+  request<AppConfig>(`/apps/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const startApp = (id: string) =>
+  request<AppConfig>(`/apps/${id}/start`, { method: "POST" });
+export const stopApp = (id: string) =>
+  request<AppConfig>(`/apps/${id}/stop`, { method: "POST" });
+export const deleteApp = (id: string) =>
+  request<{ ok: boolean }>(`/apps/${id}`, { method: "DELETE" });
+
+// --- Agents ---
+type AgentInput = Pick<AgentDef, "name" | "runtime" | "model" | "prompt" | "working_dir" | "command">;
+export const getAgents = () => request<AgentDef[]>("/agents");
+export const getAgentRuntimes = () => request<AgentRuntimes>("/agents/runtimes");
+export const getAgentModels = (runtime: string) =>
+  request<string[]>(`/agents/models?runtime=${encodeURIComponent(runtime)}`);
+export const createAgent = (data: AgentInput) =>
+  request<AgentDef>("/agents", { method: "POST", body: JSON.stringify(data) });
+export const updateAgent = (id: string, data: Partial<AgentInput>) =>
+  request<AgentDef>(`/agents/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const reorderAgents = (agentIds: string[]) =>
+  request<AgentDef[]>("/agents/reorder", { method: "POST", body: JSON.stringify({ agent_ids: agentIds }) });
+export const deleteAgent = (id: string) =>
+  request<{ ok: boolean }>(`/agents/${id}`, { method: "DELETE" });
+export const launchAgent = (id: string) =>
+  request<AgentRun>(`/agents/${id}/launch`, { method: "POST" });
+export const getAgentRuns = () => request<AgentRun[]>("/agents/runs");
+export const killAgentRun = (runId: string) =>
+  request<AgentRun>(`/agents/runs/${runId}/kill`, { method: "POST" });
+export const removeAgentRun = (runId: string) =>
+  request<{ ok: boolean }>(`/agents/runs/${runId}`, { method: "DELETE" });
+export const agentRunSocketUrl = (runId: string) =>
+  `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/agents/runs/${runId}/ws`;
