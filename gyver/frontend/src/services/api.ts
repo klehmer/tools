@@ -1,4 +1,4 @@
-import type { AgentDef, AgentRun, AgentRuntimes, AnalyticsResult, AppConfig, ChecklistItem, Direction, Link, Note, Period, Report, SavedAnalyticsReport, ScheduledJob, SummaryResult, UserProfile } from "../types";
+import type { AgentDef, AgentRun, AgentRuntimes, AnalyticsResult, ArtifactList, AppConfig, ChecklistItem, Direction, Link, Note, Period, Report, SavedAnalyticsReport, ScheduledJob, SummaryResult, UserProfile } from "../types";
 
 // Re-export SummaryResult for convenience
 export type { SummaryResult };
@@ -186,6 +186,9 @@ export const stopApp = (id: string) =>
   request<AppConfig>(`/apps/${id}/stop`, { method: "POST" });
 export const deleteApp = (id: string) =>
   request<{ ok: boolean }>(`/apps/${id}`, { method: "DELETE" });
+
+// --- Claude Artifacts ---
+export const getArtifacts = () => request<ArtifactList>("/artifacts");
 
 // --- Agents ---
 type AgentInput = Pick<AgentDef, "name" | "runtime" | "model" | "prompt" | "working_dir" | "command">;

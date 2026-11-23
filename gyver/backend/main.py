@@ -31,6 +31,7 @@ import notes
 import links
 import app_launcher
 import agents
+import artifacts
 import slack_notifier
 
 
@@ -599,6 +600,11 @@ class AgentUpdate(BaseModel):
     prompt: Optional[str] = None
     working_dir: Optional[str] = None
     command: Optional[str] = None
+
+
+@app.get("/artifacts")
+def get_artifacts():
+    return artifacts.get_list()
 
 
 class AgentReorder(BaseModel):

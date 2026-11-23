@@ -355,6 +355,13 @@ export default function AgentsPanel() {
     setRuns((prev) => prev.filter((r) => r.id !== runId));
   };
 
+  // Tabs of agents that have already exited only; removing a run that is
+  // still alive would kill it, so those are never touched here.
+  const handleCloseExited = async () => {
+    await Promise.all(runs.filter((r) => !r.running).map((r) => handleRemove(r.id)));
+    fetchRuns();
+  };
+
   if (loading) return <p className="text-slate-500">Loading...</p>;
 
   const runtimeLabel = (rt: string) => runtimes?.[rt as AgentRuntime]?.label ?? rt;
@@ -399,6 +406,7 @@ export default function AgentsPanel() {
   const runningCount = (agentId: string) =>
     runs.filter((r) => r.agent_id === agentId && r.running).length;
   const runningRuns = runs.filter((r) => r.running);
+  const exitedRuns = runs.filter((r) => !r.running);
   const current = runs.find((r) => r.id === selectedRun) ?? null;
 
   const formCard = (
@@ -500,6 +508,9 @@ export default function AgentsPanel() {
           rows={5}
           className={inputCls}
         />
+        <p className="mt-1 text-[11px] text-slate-400">
+          Not sent on launch: the agent waits for your first message and applies this to it.
+        </p>
       </div>
       <div>
         <label className={labelCls}>
@@ -723,6 +734,16 @@ export default function AgentsPanel() {
                 </div>
               ))}
             </div>
+            {exitedRuns.length > 0 && (
+              <button
+                onClick={handleCloseExited}
+                className="shrink-0 my-1.5 ml-1.5 flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-300 border border-slate-500/50 rounded-lg hover:bg-slate-700 transition-colors"
+                title="Close the tabs of agents that have exited; running agents are left alone"
+              >
+                <X size={11} />
+                Close exited ({exitedRuns.length})
+              </button>
+            )}
             {runningRuns.length > 0 && (
               <button
                 onClick={() => setConfirmKillAll(true)}
@@ -767,7 +788,7 @@ export default function AgentsPanel() {
             </div>
           )}
 
-          <div className="p-2" style={{ height: "calc(100vh - 130px)", minHeight: 560 }}>
+          <div className="p-2" style={{ height: "calc(100vh - 230px)", minHeight: 400 }}>
             {runs.length === 0 ? (
               <div className="h-full flex items-center justify-center text-sm text-slate-500">
                 Launch an agent to see its terminal here.

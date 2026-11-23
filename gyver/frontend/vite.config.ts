@@ -15,6 +15,7 @@ export default defineConfig({
       "/notes": "http://localhost:8001",
       "/links": "http://localhost:8001",
       "/apps": "http://localhost:8001",
+      "/artifacts": "http://localhost:8001",
       "/agents": { target: "http://localhost:8001", ws: true },
       "/browse": "http://localhost:8001",
       "/slack": "http://localhost:8001",

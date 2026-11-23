@@ -186,6 +186,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               <option value="links">Links</option>
               <option value="apps">Apps</option>
               <option value="agents">Agents</option>
+              <option value="artifacts">Artifacts</option>
               <option value="reports">Reports</option>
               <option value="schedule">Scheduled Jobs</option>
               <option value="analytics">Analytics</option>

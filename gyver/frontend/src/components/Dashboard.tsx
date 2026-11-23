@@ -11,9 +11,10 @@ import NotesPanel from "./NotesPanel";
 import LinksPanel from "./LinksPanel";
 import AppsPanel from "./AppsPanel";
 import AgentsPanel from "./AgentsPanel";
+import ArtifactsPanel from "./ArtifactsPanel";
 import SettingsModal from "./SettingsModal";
 
-type Tab = "summary" | "planner" | "notes" | "links" | "apps" | "agents" | "reports" | "schedule" | "analytics";
+type Tab = "summary" | "planner" | "notes" | "links" | "apps" | "agents" | "artifacts" | "reports" | "schedule" | "analytics";
 
 interface Props {
   profile: UserProfile | null;
@@ -35,6 +36,7 @@ function getInitialTab(googleEnabled: boolean): { tab: Tab; summaryMode?: "email
   if (saved === "links") return { tab: "links" };
   if (saved === "apps") return { tab: "apps" };
   if (saved === "agents") return { tab: "agents" };
+  if (saved === "artifacts") return { tab: "artifacts" };
   if (saved === "summary" && googleEnabled) return { tab: "summary" };
   return { tab: googleEnabled ? "summary" : "planner" };
 }
@@ -70,6 +72,7 @@ export default function Dashboard({
     { key: "links", label: "Links", disabled: false },
     { key: "apps", label: "Apps", disabled: false },
     { key: "agents", label: "Agents", disabled: false },
+    { key: "artifacts", label: "Artifacts", disabled: false },
     { key: "reports", label: "Reports", disabled: !googleEnabled },
     { key: "schedule", label: "Scheduled Jobs", disabled: !googleEnabled },
     { key: "analytics", label: "Analytics", disabled: !googleEnabled },
@@ -188,6 +191,7 @@ export default function Dashboard({
         {tab === "links" && <LinksPanel />}
         {tab === "apps" && <AppsPanel />}
         {tab === "agents" && <AgentsPanel />}
+        {tab === "artifacts" && <ArtifactsPanel />}
         {tab === "reports" && <ReportsPanel />}
         {tab === "schedule" && <SchedulePanel />}
         {tab === "analytics" && <AnalyticsPanel />}

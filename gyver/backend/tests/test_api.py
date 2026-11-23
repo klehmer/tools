@@ -268,6 +268,19 @@ class TestAuthRestore:
             assert client.get("/auth/restore").status_code == 404
 
 
+class TestArtifactsApi:
+    def test_empty_until_a_list_is_saved(self, client, tmp_path, monkeypatch):
+        import artifacts
+        monkeypatch.setattr(artifacts, "_FILE", tmp_path / "artifacts.json")
+        assert client.get("/artifacts").json() == {"refreshed_at": None, "artifacts": []}
+
+        saved = {"refreshed_at": "2026-11-23", "artifacts": [
+            {"title": "Doc", "url": "https://claude.ai/artifact/abc", "owner": "mine", "updated": "2026-11-20"},
+        ]}
+        (tmp_path / "artifacts.json").write_text(json.dumps(saved))
+        assert client.get("/artifacts").json() == saved
+
+
 class TestAgentsApi:
     @pytest.fixture(autouse=True)
     def _storage(self, tmp_path, monkeypatch):

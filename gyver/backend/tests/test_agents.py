@@ -52,7 +52,31 @@ class TestConfigs:
 class TestBuildCommand:
     def test_runtime_default_template(self):
         agent = {"runtime": "claude", "model": "claude-opus-5-5", "prompt": "You are a QA engineer", "command": ""}
-        assert agents.build_command(agent) == ["claude", "--model", "claude-opus-5-5", "You are a QA engineer"]
+        assert agents.build_command(agent) == [
+            "claude", "--model", "claude-opus-5-5", "--append-system-prompt", "You are a QA engineer",
+        ]
+        assert agents.prefill_text(agent) == ""
+
+    def test_claude_without_prompt_drops_the_flag(self):
+        agent = {"runtime": "claude", "model": "opus", "prompt": "", "command": ""}
+        assert agents.build_command(agent) == ["claude", "--model", "opus"]
+
+    def test_codex_takes_prompt_as_standing_instruction(self):
+        agent = {"runtime": "codex", "model": "gpt-6.2-sol", "prompt": 'Say "hi"\nthen stop', "command": ""}
+        assert agents.build_command(agent) == [
+            "codex", "--model", "gpt-6.2-sol", "-c", 'developer_instructions="Say \\"hi\\"\\nthen stop"',
+        ]
+        assert agents.prefill_text(agent) == ""
+        agent["prompt"] = ""
+        assert agents.build_command(agent) == ["codex", "--model", "gpt-6.2-sol"]
+
+    def test_prefill_runtimes_keep_prompt_out_of_the_command(self):
+        agent = {"runtime": "opencode", "model": "m", "prompt": "You are a scout", "command": ""}
+        assert agents.build_command(agent) == ["opencode", "mini", "--model", "m"]
+        assert agents.prefill_text(agent) == "You are a scout"
+        # A command override that places {prompt} itself wins
+        agent["command"] = "opencode mini --prompt {prompt}"
+        assert agents.prefill_text(agent) == ""
 
     def test_empty_values_drop_their_flag(self):
         agent = {"runtime": "opencode", "model": "", "prompt": "", "command": ""}
@@ -74,6 +98,18 @@ class TestRuns:
         assert _wait(lambda: not run.running)
         assert run.exit_code == 3
         assert b"hello-agent" in run.attach(lambda d: None)
+
+    def test_prefill_types_prompt_once_input_box_is_ready(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(agents, "_PREFILL_QUIET_SECONDS", 0.1)
+        # Stand-in for a TUI: turns on bracketed paste, then echoes what is typed
+        monkeypatch.setitem(agents.RUNTIMES, "fake", {
+            "label": "Fake", "command": "sh -c 'printf \"\\033[?2004h\"; cat'", "prefill": True,
+        })
+        a = agents.create_agent("Dev", runtime="fake", prompt="You are a developer", working_dir=str(tmp_path))
+        run = agents.launch(a["id"])
+        assert "You are a developer" not in run.command
+        assert _wait(lambda: b"You are a developer" in run.attach(lambda d: None))
+        run.kill()
 
     def test_multiple_instances_are_numbered(self, tmp_path):
         a = self._agent("sleep 30", working_dir=str(tmp_path))

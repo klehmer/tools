@@ -29,11 +29,17 @@ _FILE = _DATA_DIR / "agents.json"
 _LOCK = threading.RLock()
 
 # Command templates per runtime. {model} and {prompt} are substituted as whole
-# arguments; a flag whose value ends up empty is dropped along with the value.
+# arguments ({prompt_toml} is the prompt as a quoted TOML string); a flag whose
+# value ends up empty is dropped along with the value.
+#
+# The starting prompt is never sent as an opening message, so the agent stays
+# quiet until the user gives it something to do. Claude Code and Codex take it
+# as a standing instruction. OpenCode has no flag for that, so ("prefill") it is
+# typed into the input box, unsent, ahead of the user's first message.
 RUNTIMES: dict[str, dict] = {
-    "claude": {"label": "Claude Code", "command": "claude --model {model} {prompt}"},
-    "opencode": {"label": "OpenCode", "command": "opencode mini --model {model} --prompt {prompt}"},
-    "codex": {"label": "Codex", "command": "codex --model {model} {prompt}"},
+    "claude": {"label": "Claude Code", "command": "claude --model {model} --append-system-prompt {prompt}"},
+    "opencode": {"label": "OpenCode", "command": "opencode mini --model {model}", "prefill": True},
+    "codex": {"label": "Codex", "command": "codex --model {model} -c developer_instructions={prompt_toml}"},
     "custom": {"label": "Custom command", "command": ""},
 }
 
@@ -42,6 +48,12 @@ _FIELDS = ("name", "runtime", "model", "prompt", "working_dir", "command")
 # Keep roughly the last 512 KB of terminal output per run for replay on attach.
 _BUFFER_LIMIT = 512 * 1024
 _KILL_GRACE_SECONDS = 3
+
+# Prefill waits for the agent's UI to ask for bracketed paste (i.e. its input
+# box exists) and then for the screen to stop changing, before typing.
+_PASTE_MODE_ON = b"\x1b[?2004h"
+_PREFILL_QUIET_SECONDS = 1.0
+_PREFILL_TIMEOUT_SECONDS = 30
 
 
 # ---------------------------------------------------------------------------
@@ -133,19 +145,35 @@ def delete_agent(agent_id: str) -> bool:
 def build_command(agent: dict) -> list[str]:
     """Expand the agent's command template into an argv list."""
     template = agent.get("command") or RUNTIMES.get(agent.get("runtime", ""), {}).get("command", "")
-    values = {"{model}": agent.get("model", "").strip(), "{prompt}": agent.get("prompt", "").strip()}
+    prompt = agent.get("prompt", "").strip()
+    values = {
+        "{model}": agent.get("model", "").strip(),
+        "{prompt}": prompt,
+        # JSON string escapes are valid in a TOML basic string
+        "{prompt_toml}": json.dumps(prompt) if prompt else "",
+    }
     argv: list[str] = []
     for token in shlex.split(template):
-        if token in values:
-            if values[token]:
-                argv.append(values[token])
-            elif argv and argv[-1].startswith("-"):
-                argv.pop()  # drop the flag that introduced the empty value
+        used = [ph for ph in values if ph in token]
+        if used and not all(values[ph] for ph in used):
+            # Nothing to put here: drop it, and the flag that introduced it
+            if argv and argv[-1].startswith("-"):
+                argv.pop()
             continue
-        for placeholder, value in values.items():
-            token = token.replace(placeholder, value)
+        for ph in used:
+            token = token.replace(ph, values[ph])
         argv.append(token)
     return argv
+
+
+def prefill_text(agent: dict) -> str:
+    """The starting prompt, if it should be typed into the agent's input box rather than passed in the command."""
+    runtime = RUNTIMES.get(agent.get("runtime", ""), {})
+    template = agent.get("command") or runtime.get("command", "")
+    # A command override that names {prompt} has already decided where it goes
+    if not runtime.get("prefill") or "{prompt" in template:
+        return ""
+    return agent.get("prompt", "").strip()
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +239,7 @@ def list_models(runtime: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 class AgentRun:
-    def __init__(self, agent: dict, name: str, argv: list[str], cwd: str):
+    def __init__(self, agent: dict, name: str, argv: list[str], cwd: str, prefill: str = ""):
         self.id = uuid.uuid4().hex[:12]
         self.agent_id = agent["id"]
         self.name = name
@@ -224,6 +252,7 @@ class AgentRun:
         self._buffer = bytearray()
         self._listeners: list[Callable[[Optional[bytes]], None]] = []
         self._lock = threading.Lock()
+        self._last_output = time.monotonic()
 
         self._master, slave = pty.openpty()
         self._set_size(24, 100)
@@ -237,6 +266,8 @@ class AgentRun:
         )
         os.close(slave)
         threading.Thread(target=self._pump, daemon=True).start()
+        if prefill:
+            threading.Thread(target=self._prefill, args=(prefill,), daemon=True).start()
 
     @property
     def running(self) -> bool:
@@ -266,6 +297,7 @@ class AgentRun:
             if not data:
                 break
             with self._lock:
+                self._last_output = time.monotonic()
                 self._buffer += data
                 if len(self._buffer) > _BUFFER_LIMIT:
                     del self._buffer[: len(self._buffer) - _BUFFER_LIMIT]
@@ -282,6 +314,20 @@ class AgentRun:
             os.close(self._master)
         except OSError:
             pass
+
+    def _prefill(self, text: str) -> None:
+        """Type the starting prompt into the agent's input box without sending it."""
+        deadline = time.monotonic() + _PREFILL_TIMEOUT_SECONDS
+        while self.running and time.monotonic() < deadline:
+            with self._lock:
+                ready = _PASTE_MODE_ON in self._buffer
+                quiet = time.monotonic() - self._last_output
+            if ready and quiet >= _PREFILL_QUIET_SECONDS:
+                break
+            time.sleep(0.1)
+        # As a paste, so line breaks in the prompt stay line breaks instead of
+        # submitting; the blank line leaves the cursor where the user's message goes.
+        self.write(b"\x1b[200~" + text.encode() + b"\n\n\x1b[201~")
 
     def attach(self, listener: Callable[[Optional[bytes]], None]) -> bytes:
         """Register a listener and return the output so far (for replay)."""
@@ -366,7 +412,7 @@ def launch(agent_id: str) -> AgentRun:
         raise ValueError(f"Working directory does not exist: {cwd}")
     with _LOCK:
         n = _launch_counts[agent_id] = _launch_counts.get(agent_id, 0) + 1
-        run = AgentRun(agent, f"{agent['name']} #{n}", argv, cwd)
+        run = AgentRun(agent, f"{agent['name']} #{n}", argv, cwd, prefill_text(agent))
         _runs[run.id] = run
     return run
 

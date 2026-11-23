@@ -165,6 +165,20 @@ export interface Link {
   created_at: string;
 }
 
+// --- Claude Artifacts ---
+
+export interface ClaudeArtifact {
+  title: string;
+  url: string;
+  owner: "mine" | "shared";
+  updated: string | null;
+}
+
+export interface ArtifactList {
+  refreshed_at: string | null;
+  artifacts: ClaudeArtifact[];
+}
+
 // --- App Launcher ---
 
 export interface AppConfig {
