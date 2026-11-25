@@ -44,8 +44,91 @@ function openLink(uri: string) {
   if (/^https?:\/\//i.test(uri)) window.open(uri, "_blank", "noopener,noreferrer");
 }
 
+const RUN_NOTES_KEY = "gyver_agent_run_notes";
+
+/** What the user knows a run by: their own label, or the first thing they asked it. */
+interface RunNote {
+  label?: string;
+  task?: string;
+}
+
+function loadRunNotes(): Record<string, RunNote> {
+  try {
+    return JSON.parse(localStorage.getItem(RUN_NOTES_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+interface RunTitle {
+  summary: string;
+  busy: boolean;
+}
+
+/**
+ * Agent CLIs set the terminal title to a short description of the session,
+ * behind a status glyph (Claude Code: a spinner while working, "✳" when idle).
+ */
+function parseTitle(raw: string): RunTitle {
+  const m = raw.match(/^([^\p{L}\p{N}\s~/.])\s+(.*)$/u);
+  const glyph = m ? m[1] : "";
+  const text = (m ? m[2] : raw).trim();
+  return {
+    // A bare program name or a folder path says nothing about what the agent is doing
+    summary: /^(claude( code)?|codex|opencode)$/i.test(text) || /^[~/.]/.test(text) ? "" : text,
+    busy: /[◐◑◒◓\u2801-\u28ff]/.test(glyph),
+  };
+}
+
+/**
+ * Watches keystrokes for the first real message the user sends: the fallback
+ * summary for CLIs that don't set a title. Short answers to startup dialogs
+ * and slash commands don't count.
+ */
+function firstMessageWatcher(onMessage: (text: string) => void) {
+  let buf = "";
+  let inPaste = false;
+  let done = false;
+  return (data: string) => {
+    if (done) return;
+    for (const tok of data.match(/\x1b\[20[01]~|\x1b\[[0-9;?]*[ -/]*[@-~]|\x1bO.|\x1b.|[\s\S]/g) ?? []) {
+      if (tok === "\x1b[200~") inPaste = true;
+      else if (tok === "\x1b[201~") inPaste = false;
+      else if (tok.length > 1) continue; // arrow keys and other escape sequences
+      else if (tok === "\r" || tok === "\n") {
+        if (inPaste) {
+          buf += " ";
+          continue;
+        }
+        const text = buf.trim();
+        buf = "";
+        if (text.length >= 4 && !text.startsWith("/")) {
+          done = true;
+          onMessage(text.slice(0, 300));
+          return;
+        }
+      } else if (tok === "\x7f" || tok === "\b") buf = buf.slice(0, -1);
+      else if (tok === "\x03" || tok === "\x15") buf = "";
+      else if (tok >= " ") buf += tok;
+    }
+  };
+}
+
 /** One live terminal attached to a run. Stays mounted while hidden so its screen survives tab switches. */
-function AgentTerminal({ runId, active }: { runId: string; active: boolean }) {
+function AgentTerminal({
+  runId,
+  active,
+  onTitle,
+  onFirstMessage,
+}: {
+  runId: string;
+  active: boolean;
+  onTitle: (runId: string, title: string) => void;
+  onFirstMessage: (runId: string, text: string) => void;
+}) {
+  // Latest callbacks without reconnecting the terminal when the parent re-renders
+  const callbacks = useRef({ onTitle, onFirstMessage });
+  callbacks.current = { onTitle, onFirstMessage };
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -99,7 +182,12 @@ function AgentTerminal({ runId, active }: { runId: string; active: boolean }) {
         term.write(new Uint8Array(e.data));
       }
     };
-    const onData = term.onData((data) => send({ type: "input", data }));
+    const watchInput = firstMessageWatcher((text) => callbacks.current.onFirstMessage(runId, text));
+    const onData = term.onData((data) => {
+      watchInput(data);
+      send({ type: "input", data });
+    });
+    const onTitleChange = term.onTitleChange((title) => callbacks.current.onTitle(runId, title));
     const onResize = term.onResize(sendSize);
     const observer = new ResizeObserver(fit);
     observer.observe(host);
@@ -107,6 +195,7 @@ function AgentTerminal({ runId, active }: { runId: string; active: boolean }) {
     return () => {
       observer.disconnect();
       onData.dispose();
+      onTitleChange.dispose();
       onResize.dispose();
       ws.close();
       term.dispose();
@@ -200,6 +289,10 @@ export default function AgentsPanel() {
   const [confirmKillAll, setConfirmKillAll] = useState(false);
   const [commandExpanded, setCommandExpanded] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [titles, setTitles] = useState<Record<string, RunTitle>>({});
+  const [notes, setNotes] = useState<Record<string, RunNote>>(loadRunNotes);
+  // Label being typed for the selected run; null when not renaming
+  const [labelDraft, setLabelDraft] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(COLLAPSED_KEY) === "1";
@@ -253,6 +346,53 @@ export default function AgentsPanel() {
       setSelectedRun(runs[runs.length - 1].id);
     }
   }, [runs, selectedRun]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(RUN_NOTES_KEY, JSON.stringify(notes));
+    } catch {}
+  }, [notes]);
+
+  // Forget notes for runs that no longer exist
+  useEffect(() => {
+    if (loading) return;
+    const live = new Set(runs.map((r) => r.id));
+    setNotes((prev) =>
+      Object.keys(prev).every((id) => live.has(id))
+        ? prev
+        : Object.fromEntries(Object.entries(prev).filter(([id]) => live.has(id))),
+    );
+  }, [runs, loading]);
+
+  useEffect(() => setLabelDraft(null), [selectedRun]);
+
+  const handleTitle = (runId: string, raw: string) => {
+    const next = parseTitle(raw);
+    // The spinner re-sends the title constantly; only real changes re-render
+    setTitles((prev) =>
+      prev[runId]?.summary === next.summary && prev[runId]?.busy === next.busy
+        ? prev
+        : { ...prev, [runId]: next },
+    );
+  };
+
+  const handleFirstMessage = (runId: string, text: string) =>
+    setNotes((prev) => (prev[runId]?.task ? prev : { ...prev, [runId]: { ...prev[runId], task: text } }));
+
+  const saveLabel = (runId: string) => {
+    const label = (labelDraft ?? "").trim();
+    const automatic = titles[runId]?.summary || notes[runId]?.task || "";
+    // Empty, or the automatic summary left unedited, keeps following the automatic one
+    setNotes((prev) => ({
+      ...prev,
+      [runId]: { ...prev[runId], label: label && label !== automatic ? label : undefined },
+    }));
+    setLabelDraft(null);
+  };
+
+  /** Your label, else what the agent's CLI says it is doing, else the first thing you asked it. */
+  const summaryFor = (runId: string) =>
+    notes[runId]?.label || titles[runId]?.summary || notes[runId]?.task || "";
 
   const fetchRuns = async () => {
     try {
@@ -697,17 +837,41 @@ export default function AgentsPanel() {
                 <div
                   key={run.id}
                   onClick={() => setSelectedRun(run.id)}
-                  className={`flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-t-lg text-xs cursor-pointer whitespace-nowrap ${
+                  onDoubleClick={() => {
+                    setSelectedRun(run.id);
+                    // After the selection effect has cleared any earlier draft
+                    setTimeout(() => setLabelDraft(notes[run.id]?.label ?? summaryFor(run.id)), 0);
+                  }}
+                  title={`${run.name}${summaryFor(run.id) ? `\n${summaryFor(run.id)}` : ""}\nDouble-click to rename`}
+                  className={`shrink-0 max-w-[16rem] flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-t-lg text-xs cursor-pointer ${
                     run.id === selectedRun
                       ? "bg-slate-900 text-white"
                       : "text-slate-400 hover:text-slate-200"
                   }`}
                 >
                   <span
-                    className={`w-2 h-2 rounded-full ${run.running ? "bg-emerald-400" : "bg-slate-500"}`}
-                    title={run.running ? "Running" : `Exited (${run.exit_code})`}
+                    className={`shrink-0 w-2 h-2 rounded-full ${
+                      !run.running
+                        ? "bg-slate-500"
+                        : titles[run.id]?.busy
+                          ? "bg-amber-400 animate-pulse"
+                          : "bg-emerald-400"
+                    }`}
+                    title={
+                      !run.running
+                        ? `Exited (${run.exit_code})`
+                        : titles[run.id]?.busy
+                          ? "Working"
+                          : "Running"
+                    }
                   />
-                  {run.name}
+                  {/* What it is doing first; "Agent #N" is hard to tell apart */}
+                  <div className="min-w-0 leading-tight">
+                    <div className="truncate font-medium">{summaryFor(run.id) || run.name}</div>
+                    {summaryFor(run.id) && (
+                      <div className="truncate text-[10px] opacity-60">{run.name}</div>
+                    )}
+                  </div>
                   {run.running ? (
                     <button
                       onClick={(e) => {
@@ -758,9 +922,45 @@ export default function AgentsPanel() {
 
           {current && (
             <div className="px-3 py-2 border-b border-slate-800 text-xs text-slate-300 space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 font-semibold text-white">{current.name}</span>
+                {labelDraft !== null ? (
+                  <input
+                    autoFocus
+                    value={labelDraft}
+                    onChange={(e) => setLabelDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveLabel(current.id);
+                      if (e.key === "Escape") setLabelDraft(null);
+                    }}
+                    onBlur={() => saveLabel(current.id)}
+                    placeholder="Label for this agent (empty = automatic)"
+                    className="flex-1 min-w-0 bg-slate-800 border border-slate-600 rounded px-2 py-0.5 text-xs text-white outline-none focus:border-indigo-400"
+                  />
+                ) : (
+                  <>
+                    <span className="min-w-0 break-words text-slate-200">
+                      {summaryFor(current.id) || (
+                        <span className="text-slate-500 italic">No summary yet</span>
+                      )}
+                    </span>
+                    <button
+                      onClick={() => setLabelDraft(notes[current.id]?.label ?? summaryFor(current.id))}
+                      className="shrink-0 p-0.5 text-slate-500 hover:text-white"
+                      title="Rename this agent"
+                    >
+                      <Pencil size={12} />
+                    </button>
+                  </>
+                )}
+              </div>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                 <span className={current.running ? "text-emerald-400" : "text-slate-400"}>
-                  {current.running ? "Running" : `Exited (${current.exit_code})`}
+                  {!current.running
+                    ? `Exited (${current.exit_code})`
+                    : titles[current.id]?.busy
+                      ? "Working"
+                      : "Running"}
                 </span>
                 <span>
                   <span className="text-slate-500">Harness </span>
@@ -795,7 +995,13 @@ export default function AgentsPanel() {
               </div>
             ) : (
               runs.map((run) => (
-                <AgentTerminal key={run.id} runId={run.id} active={run.id === selectedRun} />
+                <AgentTerminal
+                  key={run.id}
+                  runId={run.id}
+                  active={run.id === selectedRun}
+                  onTitle={handleTitle}
+                  onFirstMessage={handleFirstMessage}
+                />
               ))
             )}
           </div>
